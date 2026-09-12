@@ -129,6 +129,20 @@ class KrillionService:
 
     # -- finalization ----------------------------------------------------
 
+    def projected_deltas(self, guild_id: int, results: list[Result]) -> dict[int, float]:
+        """Rating change each submitter would get if ``results`` closed the day now."""
+        players = {
+            p.user_id: p for p in self.storage.players(guild_id, [r.user_id for r in results])
+        }
+        scores = {r.user_id: r.score for r in results}
+        ratings = {uid: players[uid].rating for uid in scores}
+        games = self.storage.games_played(guild_id)
+        ks = {
+            uid: k_factor(games.get(uid, 0), self.k, self.provisional_k, self.provisional_games)
+            for uid in scores
+        }
+        return rating_deltas(ratings, scores, ks)
+
     def next_finalize_at(self, now: datetime) -> datetime:
         return self.calendar.next_reset(now) + self.grace
 
@@ -149,11 +163,7 @@ class KrillionService:
         scores = {r.user_id: r.score for r in results}
         ratings = {uid: players[uid].rating for uid in scores}
         games = self.storage.games_played(guild_id)
-        ks = {
-            uid: k_factor(games.get(uid, 0), self.k, self.provisional_k, self.provisional_games)
-            for uid in scores
-        }
-        deltas = rating_deltas(ratings, scores, ks)
+        deltas = self.projected_deltas(guild_id, results)
         places = placements(scores)
         entries = [
             RatingEntry(

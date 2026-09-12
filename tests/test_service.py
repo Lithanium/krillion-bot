@@ -260,17 +260,20 @@ def test_formatting(service):
     submit(service, 2, "bob", share(58, 120))
     results = service.storage.results_for(GUILD, 58)
     players = {p.user_id: p for p in service.storage.players(GUILD)}
-    live = live_leaderboard(58, results, players, reset_unix=1_800_000_000)
+    deltas = service.projected_deltas(GUILD, results)
+    live = live_leaderboard(58, results, players, deltas=deltas, reset_unix=1_800_000_000)
     assert "Krillion #58 — live" in live
-    assert "🥇 **alice** — 340" in live and "🥈 **bob** — 120" in live
+    assert "🥇 **alice** (1200)  🦑🦑🦑🦑🦑🐟🫧  **340**  +16" in live
+    assert "🥈 **bob** (1200)  🦑🦑🦑🦑🦑🐟🫧  **120**  -16" in live
     assert "<t:1800000000:R>" in live
     assert live_leaderboard(59, [], players) == "**Krillion #59** — no results yet. 🫧"
 
     day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
-    final = daily_leaderboard(58, day.entries, day.players)
+    tiers = {r.user_id: r.tiers for r in results}
+    final = daily_leaderboard(58, day.entries, day.players, tiers=tiers)
     assert "Krillion #58 — final results" in final
-    assert "🥇 **alice** — 340  (1200 → 1216, +16)" in final
-    assert "🥈 **bob** — 120  (1200 → 1184, -16)" in final
+    assert "🥇 **alice** (1200 → 1216)  🦑🦑🦑🦑🦑🐟🫧  **340**  +16" in final
+    assert "🥈 **bob** (1200 → 1184)  🦑🦑🦑🦑🦑🐟🫧  **120**  -16" in final
 
     board = elo_leaderboard(service.storage.players(GUILD), service.storage.games_played(GUILD))
     assert board.splitlines()[1] == "🥇 **alice** — 1216  (1 played)"
@@ -283,8 +286,8 @@ def test_formatting_marks_provisional(provisional_service):
     submit(service, 2, "bob", share(58, 120))
     day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
     final = daily_leaderboard(58, day.entries, day.players, day.provisional)
-    assert "🥇 **alice** — 340  (1200 → 1232?, +32)" in final
-    assert "🥈 **bob** — 120  (1200 → 1168?, -32)" in final
+    assert "🥇 **alice** (1200 → 1232?)  " in final and "  **340**  +32" in final
+    assert "🥈 **bob** (1200 → 1168?)  " in final and "  **120**  -32" in final
     assert final.splitlines()[-1].startswith("_? = provisional rating")
 
     players = service.storage.players(GUILD)

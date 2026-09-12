@@ -152,7 +152,13 @@ class KrillionBot(discord.Client):
         if not isinstance(channel, discord.abc.Messageable):
             log.error("Channel %s is not messageable", channel_id)
             return
-        text = daily_leaderboard(day.puzzle_number, day.entries, day.players, day.provisional)
+        tiers = {
+            r.user_id: r.tiers
+            for r in self.service.storage.results_for(day.guild_id, day.puzzle_number)
+        }
+        text = daily_leaderboard(
+            day.puzzle_number, day.entries, day.players, day.provisional, tiers
+        )
         await channel.send(text)
         log.info("Posted Krillion #%d results for guild %s", day.puzzle_number, day.guild_id)
 
@@ -178,21 +184,28 @@ class KrillionBot(discord.Client):
                 ids = [e.user_id for e in entries]
                 players = {p.user_id: p for p in storage.players(guild_id, ids)}
                 provisional = service.provisional_players(guild_id, ids, as_of_puzzle=n)
+                tiers = {r.user_id: r.tiers for r in storage.results_for(guild_id, n)}
                 await interaction.response.send_message(
-                    daily_leaderboard(n, entries, players, provisional)
+                    daily_leaderboard(n, entries, players, provisional, tiers)
                 )
                 return
             results = storage.results_for(guild_id, n)
-            players = {
-                p.user_id: p for p in storage.players(guild_id, [r.user_id for r in results])
-            }
+            ids = [r.user_id for r in results]
+            players = {p.user_id: p for p in storage.players(guild_id, ids)}
             reset_unix = (
                 int(service.next_finalize_at(now).timestamp())
                 if n == calendar.current(now)
                 else None
             )
             await interaction.response.send_message(
-                live_leaderboard(n, results, players, reset_unix=reset_unix)
+                live_leaderboard(
+                    n,
+                    results,
+                    players,
+                    deltas=service.projected_deltas(guild_id, results),
+                    provisional=service.provisional_players(guild_id, ids),
+                    reset_unix=reset_unix,
+                )
             )
 
         @tree.command(name="elo", description="Krillion Elo rankings for this server.")
