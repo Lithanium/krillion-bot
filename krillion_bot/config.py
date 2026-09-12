@@ -40,6 +40,8 @@ class Config:
     results_channel_id: int | None
     late_grace_minutes: int
     elo_k: float
+    provisional_k: float
+    provisional_games: int
     puzzle_tz: ZoneInfo
     epoch_date: date
     log_level: str
@@ -56,6 +58,8 @@ class Config:
             results_channel_id=_int_or_none(os.environ.get("RESULTS_CHANNEL_ID")),
             late_grace_minutes=int(os.environ.get("LATE_GRACE_MINUTES", "10")),
             elo_k=float(os.environ.get("ELO_K", "32")),
+            provisional_k=float(os.environ.get("ELO_PROVISIONAL_K", "64")),
+            provisional_games=int(os.environ.get("ELO_PROVISIONAL_GAMES", "5")),
             puzzle_tz=ZoneInfo(os.environ.get("KRILLION_TIMEZONE", "America/New_York")),
             epoch_date=date.fromisoformat(os.environ.get("KRILLION_EPOCH_DATE", "2026-07-16")),
             log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),

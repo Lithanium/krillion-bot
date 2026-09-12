@@ -130,7 +130,7 @@ class KrillionBot(discord.Client):
         if not isinstance(channel, discord.abc.Messageable):
             log.error("Channel %s is not messageable", channel_id)
             return
-        text = daily_leaderboard(day.puzzle_number, day.entries, day.players)
+        text = daily_leaderboard(day.puzzle_number, day.entries, day.players, day.provisional)
         await channel.send(text)
         log.info("Posted Krillion #%d results for guild %s", day.puzzle_number, day.guild_id)
 
@@ -153,10 +153,12 @@ class KrillionBot(discord.Client):
             guild_id = interaction.guild_id
             if storage.is_finalized(guild_id, n):
                 entries = storage.history_for(guild_id, n)
-                players = {
-                    p.user_id: p for p in storage.players(guild_id, [e.user_id for e in entries])
-                }
-                await interaction.response.send_message(daily_leaderboard(n, entries, players))
+                ids = [e.user_id for e in entries]
+                players = {p.user_id: p for p in storage.players(guild_id, ids)}
+                provisional = service.provisional_players(guild_id, ids, as_of_puzzle=n)
+                await interaction.response.send_message(
+                    daily_leaderboard(n, entries, players, provisional)
+                )
                 return
             results = storage.results_for(guild_id, n)
             players = {
@@ -178,7 +180,10 @@ class KrillionBot(discord.Client):
                 return
             players = storage.players(interaction.guild_id)
             games = storage.games_played(interaction.guild_id)
-            await interaction.response.send_message(elo_leaderboard(players, games))
+            provisional = service.provisional_players(
+                interaction.guild_id, [p.user_id for p in players]
+            )
+            await interaction.response.send_message(elo_leaderboard(players, games, provisional))
 
         @tree.command(name="stats", description="Krillion stats for you or another diver.")
         @app_commands.describe(member="Whose stats (default: you)")
@@ -199,9 +204,12 @@ class KrillionBot(discord.Client):
             s = storage.stats_for(interaction.guild_id, target.id)
             avg = f"{s.average_score:.0f}" if s.average_score is not None else "—"
             best = str(s.best_score) if s.best_score is not None else "—"
+            rating = f"**{round(player.rating)}**"
+            if service.is_provisional(s.games):
+                rating += f" (provisional, {s.games}/{service.provisional_games} days)"
             await interaction.response.send_message(
                 f"**{player.display_name}** 🦐\n"
-                f"Elo **{round(player.rating)}** · {s.games} played · {s.wins} wins\n"
+                f"Elo {rating} · {s.games} played · {s.wins} wins\n"
                 f"Best {best} · Average {avg}"
             )
 
@@ -223,5 +231,7 @@ def build(config: Config) -> KrillionBot:
         calendar,
         grace=timedelta(minutes=config.late_grace_minutes),
         k=config.elo_k,
+        provisional_k=config.provisional_k,
+        provisional_games=config.provisional_games,
     )
     return KrillionBot(config, service)

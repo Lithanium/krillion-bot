@@ -296,10 +296,16 @@ class Storage:
             average_score=row["avg"],
         )
 
-    def games_played(self, guild_id: int) -> dict[int, int]:
+    def games_played(self, guild_id: int, up_to_puzzle: int | None = None) -> dict[int, int]:
+        """Rated days per user, optionally only counting puzzles ``<= up_to_puzzle``."""
+        params: tuple[int, ...] = (guild_id,)
+        where = "guild_id = ?"
+        if up_to_puzzle is not None:
+            where += " AND puzzle_number <= ?"
+            params += (up_to_puzzle,)
         rows = self._conn.execute(
-            "SELECT user_id, COUNT(*) AS n FROM rating_history WHERE guild_id = ? GROUP BY user_id",
-            (guild_id,),
+            f"SELECT user_id, COUNT(*) AS n FROM rating_history WHERE {where} GROUP BY user_id",
+            params,
         ).fetchall()
         return {r["user_id"]: r["n"] for r in rows}
 

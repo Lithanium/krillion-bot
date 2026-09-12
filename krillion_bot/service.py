@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 
-from .elo import DEFAULT_K, placements, rating_deltas
+from .elo import (
+    DEFAULT_K,
+    PROVISIONAL_GAMES,
+    PROVISIONAL_K,
+    is_provisional,
+    k_factor,
+    placements,
+    rating_deltas,
+)
 from .parser import ParsedResult, parse_result
 from .puzzle import PuzzleCalendar
 from .storage import Player, RatingEntry, Result, Storage
@@ -35,6 +44,8 @@ class FinalizedDay:
     channel_id: int
     entries: list[RatingEntry]
     players: dict[int, Player]
+    provisional: frozenset[int]
+    """Players still provisional after this day."""
 
 
 class KrillionService:
@@ -45,11 +56,25 @@ class KrillionService:
         *,
         grace: timedelta = timedelta(minutes=10),
         k: float = DEFAULT_K,
+        provisional_k: float = PROVISIONAL_K,
+        provisional_games: int = PROVISIONAL_GAMES,
     ) -> None:
         self.storage = storage
         self.calendar = calendar or PuzzleCalendar()
         self.grace = grace
         self.k = k
+        self.provisional_k = provisional_k
+        self.provisional_games = provisional_games
+
+    def is_provisional(self, games_played: int) -> bool:
+        return is_provisional(games_played, self.provisional_games)
+
+    def provisional_players(
+        self, guild_id: int, user_ids: Iterable[int], *, as_of_puzzle: int | None = None
+    ) -> frozenset[int]:
+        """Which of ``user_ids`` are provisional (optionally right after ``as_of_puzzle``)."""
+        games = self.storage.games_played(guild_id, as_of_puzzle)
+        return frozenset(uid for uid in user_ids if self.is_provisional(games.get(uid, 0)))
 
     # -- submissions -----------------------------------------------------
 
@@ -116,7 +141,12 @@ class KrillionService:
         }
         scores = {r.user_id: r.score for r in results}
         ratings = {uid: players[uid].rating for uid in scores}
-        deltas = rating_deltas(ratings, scores, self.k)
+        games = self.storage.games_played(guild_id)
+        ks = {
+            uid: k_factor(games.get(uid, 0), self.k, self.provisional_k, self.provisional_games)
+            for uid in scores
+        }
+        deltas = rating_deltas(ratings, scores, ks)
         places = placements(scores)
         entries = [
             RatingEntry(
@@ -138,7 +168,8 @@ class KrillionService:
         updated = {
             p.user_id: p for p in self.storage.players(guild_id, [r.user_id for r in results])
         }
-        return FinalizedDay(guild_id, puzzle_number, channel_id, entries, updated)
+        provisional = frozenset(uid for uid in scores if self.is_provisional(games.get(uid, 0) + 1))
+        return FinalizedDay(guild_id, puzzle_number, channel_id, entries, updated, provisional)
 
     def finalize_due(self, now: datetime) -> list[FinalizedDay]:
         done: list[FinalizedDay] = []

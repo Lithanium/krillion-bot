@@ -33,6 +33,9 @@ SQLite on disk, ~60 MB RAM, no other services.
   across opponents, so a day can move you at most ±32 and the size of the
   change depends on who else played and how strong they are. A day with a
   single submitter changes nothing.
+- **Provisional ratings**: a player's first 5 rated days use K = 64 (max
+  ±64/day) so new divers reach their real level fast. They're shown with a
+  `?` after the rating (e.g. `1264?`) until established.
 - **Slash commands**
   - `/leaderboard [puzzle]` – live scores for today (or the final table for a
     past puzzle number)
@@ -107,6 +110,8 @@ All settings live in `.env` (see `.env.example`):
 | `DATABASE_PATH` | `data/krillion.sqlite3` | SQLite file |
 | `LATE_GRACE_MINUTES` | `10` | How long after reset the previous puzzle is still accepted |
 | `ELO_K` | `32` | Elo K-factor (max daily swing) |
+| `ELO_PROVISIONAL_K` | `64` | K-factor during a player's provisional period |
+| `ELO_PROVISIONAL_GAMES` | `5` | Rated days before a player is established |
 | `KRILLION_TIMEZONE` | `America/New_York` | Timezone the game resets in |
 | `KRILLION_EPOCH_DATE` | `2026-07-16` | Date of Krillion #1 |
 

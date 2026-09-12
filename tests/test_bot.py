@@ -48,6 +48,8 @@ def make_config(tmp_path: Path, **overrides) -> Config:
         results_channel_id=None,
         late_grace_minutes=10,
         elo_k=32,
+        provisional_k=64,
+        provisional_games=5,
         puzzle_tz=ZoneInfo("America/New_York"),
         epoch_date=PuzzleCalendar().epoch,
         log_level="INFO",

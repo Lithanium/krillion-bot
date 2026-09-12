@@ -23,12 +23,15 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setenv("RESULTS_CHANNEL_ID", "123")
     monkeypatch.setenv("LATE_GRACE_MINUTES", "5")
     monkeypatch.setenv("ELO_K", "40")
+    monkeypatch.setenv("ELO_PROVISIONAL_K", "80")
+    monkeypatch.setenv("ELO_PROVISIONAL_GAMES", "3")
     cfg = Config.from_env()
     assert cfg.token == "abc"
     assert cfg.leaderboard_channel_id is None
     assert cfg.results_channel_id == 123
     assert cfg.late_grace_minutes == 5
     assert cfg.elo_k == 40
+    assert (cfg.provisional_k, cfg.provisional_games) == (80, 3)
     assert str(cfg.puzzle_tz) == "America/New_York"
 
 

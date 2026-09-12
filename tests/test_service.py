@@ -24,6 +24,15 @@ def share(n: int, score: int) -> str:
 
 @pytest.fixture
 def service() -> KrillionService:
+    """Service with the provisional phase disabled (plain K=32)."""
+    return KrillionService(
+        Storage(":memory:"), PuzzleCalendar(), grace=timedelta(minutes=10), provisional_games=0
+    )
+
+
+@pytest.fixture
+def provisional_service() -> KrillionService:
+    """Defaults: first 5 rated days use K=64."""
     return KrillionService(Storage(":memory:"), PuzzleCalendar(), grace=timedelta(minutes=10))
 
 
@@ -103,6 +112,7 @@ def test_finalize_applies_elo_and_posts_once(service):
     assert by_user[3].delta == pytest.approx(-8)
     assert service.storage.get_player(GUILD, 1).rating == pytest.approx(1216)
     assert service.storage.get_player(GUILD, 2).rating == pytest.approx(1192)
+    assert day.provisional == frozenset()
 
     # Idempotent: a second pass does nothing, and late results are refused.
     assert service.finalize_due(close + timedelta(hours=1)) == []
@@ -122,6 +132,46 @@ def test_finalizes_missed_days_after_downtime(service):
     bob = service.storage.get_player(GUILD, 2).rating
     assert alice < 1216 and bob > 1184
     assert alice + bob == pytest.approx(2400)
+
+
+def test_provisional_players_use_higher_k(provisional_service):
+    service = provisional_service
+    submit(service, 1, "alice", share(58, 340))
+    submit(service, 2, "bob", share(58, 120))
+    day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
+    assert day.provisional == {1, 2}
+    assert service.storage.get_player(GUILD, 1).rating == pytest.approx(1232)
+    assert service.storage.get_player(GUILD, 2).rating == pytest.approx(1168)
+    assert service.provisional_players(GUILD, [1, 2]) == {1, 2}
+    assert service.provisional_players(GUILD, [1, 2], as_of_puzzle=57) == {1, 2}
+
+
+def test_player_becomes_established_after_five_days(provisional_service):
+    service = provisional_service
+    cal = service.calendar
+    # alice and bob tie every day, so ratings stay 1200 and only the game count matters.
+    for n in range(58, 63):
+        now = cal.start(n) + timedelta(hours=1)
+        submit(service, 1, "alice", share(n, 300), now=now)
+        submit(service, 2, "bob", share(n, 300), now=now)
+        service.finalize_due(cal.end(n) + timedelta(minutes=10))
+    assert service.storage.games_played(GUILD) == {1: 5, 2: 5}
+    assert service.provisional_players(GUILD, [1, 2]) == frozenset()
+    assert service.provisional_players(GUILD, [1, 2], as_of_puzzle=61) == {1, 2}
+
+    # Day 6: carol is new (K=64) while alice and bob are established (K=32).
+    now = cal.start(63) + timedelta(hours=1)
+    submit(service, 1, "alice", share(63, 500), now=now)
+    submit(service, 2, "bob", share(63, 300), now=now)
+    submit(service, 3, "carol", share(63, 100), now=now)
+    day = service.finalize_due(cal.end(63) + timedelta(minutes=10))[0]
+    assert day.provisional == {3}
+    deltas = {e.user_id: e.delta for e in day.entries}
+    # alice beats two equal-rated opponents: 32/2 * (0.5 + 0.5) = +16
+    assert deltas[1] == pytest.approx(16)
+    assert deltas[2] == pytest.approx(0)
+    # carol loses both with K=64: 64/2 * (-0.5 - 0.5) = -32
+    assert deltas[3] == pytest.approx(-32)
 
 
 def test_stats_and_games(service):
@@ -167,3 +217,20 @@ def test_formatting(service):
 
     board = elo_leaderboard(service.storage.players(GUILD), service.storage.games_played(GUILD))
     assert board.splitlines()[1] == "🥇 **alice** — 1216  (1 played)"
+    assert "provisional" not in board
+
+
+def test_formatting_marks_provisional(provisional_service):
+    service = provisional_service
+    submit(service, 1, "alice", share(58, 340))
+    submit(service, 2, "bob", share(58, 120))
+    day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
+    final = daily_leaderboard(58, day.entries, day.players, day.provisional)
+    assert "🥇 **alice** — 340  (1200 → 1232?, +32)" in final
+    assert "🥈 **bob** — 120  (1200 → 1168?, -32)" in final
+    assert final.splitlines()[-1].startswith("_? = provisional rating")
+
+    players = service.storage.players(GUILD)
+    board = elo_leaderboard(players, service.storage.games_played(GUILD), {1})
+    assert "🥇 **alice** — 1232?  (1 played)" in board
+    assert "🥈 **bob** — 1168  (1 played)" in board
