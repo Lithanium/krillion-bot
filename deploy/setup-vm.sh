@@ -70,6 +70,28 @@ fi
 nice -n 19 .venv/bin/pip install --quiet --no-cache-dir --no-build-isolation .
 mkdir -p data
 
+# Leaderboard images: DejaVu Sans for text (usually preinstalled) and Noto Color
+# Emoji for the result rows (~10 MB, fetched once). Without it the bot sends text.
+if [ ! -f fonts/NotoColorEmoji.ttf ]; then
+    echo "==> Downloading Noto Color Emoji font"
+    mkdir -p fonts
+    curl -fsSL -o fonts/NotoColorEmoji.ttf \
+        https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf \
+        || echo "!!  Font download failed; leaderboards will be text-only until it exists"
+fi
+if ! ls /usr/share/fonts/*/DejaVuSans.ttf /usr/share/fonts/*/*/DejaVuSans.ttf >/dev/null 2>&1; then
+    echo "==> Installing DejaVu Sans"
+    if command -v apt-get >/dev/null 2>&1; then
+        sudo DEBIAN_FRONTEND=noninteractive nice -n 19 apt-get install -y -qq --no-install-recommends \
+            fonts-dejavu-core >/dev/null
+    else
+        OL="$(. /etc/os-release && echo "${VERSION_ID%%.*}")"
+        sudo nice -n 19 dnf install -y -q --nodocs --setopt=install_weak_deps=False \
+            --disablerepo='*' --enablerepo="ol${OL}_baseos_latest,ol${OL}_appstream" \
+            dejavu-sans-fonts >/dev/null
+    fi
+fi
+
 if [ ! -f .env ]; then
     cp .env.example .env
     echo

@@ -9,6 +9,7 @@ description = "Discord bot that tracks daily Krillion.io results, posts a daily 
 requires-python = ">=3.10"
 dependencies = [
     "discord.py>=2.4,<3",
+    "pillow>=10.1",
 ]
 
 [project.optional-dependencies]

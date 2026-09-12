@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import discord
 from discord import app_commands
 
 from .config import Config
-from .formatting import daily_leaderboard, elo_leaderboard, live_leaderboard
+from .formatting import Board, elo_leaderboard, final_board, live_board
 from .puzzle import PuzzleCalendar
+from .render import render_board
 from .service import FinalizedDay, KrillionService, SubmitStatus
 from .storage import Storage
 
@@ -20,6 +23,25 @@ _POLL_CAP = timedelta(minutes=15)
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def board_message(board: Board, filename: str) -> dict[str, Any]:
+    """kwargs for ``send``: the board as a PNG attachment, or as text if that fails.
+
+    Notes carrying a Discord timestamp can't go in the image, so they stay as text.
+    """
+    try:
+        png = render_board(board)
+    except Exception:
+        log.exception("Rendering leaderboard image failed; sending text")
+        png = None
+    if png is None:
+        return {"content": board.text()}
+    timed = [n for n in board.notes if "<t:" in n]
+    return {
+        "content": "\n".join(timed) or None,
+        "file": discord.File(io.BytesIO(png), filename=filename),
+    }
 
 
 class KrillionBot(discord.Client):
@@ -156,10 +178,8 @@ class KrillionBot(discord.Client):
             r.user_id: r.tiers
             for r in self.service.storage.results_for(day.guild_id, day.puzzle_number)
         }
-        text = daily_leaderboard(
-            day.puzzle_number, day.entries, day.players, day.provisional, tiers
-        )
-        await channel.send(text)
+        board = final_board(day.puzzle_number, day.entries, day.players, day.provisional, tiers)
+        await channel.send(**board_message(board, f"krillion-{day.puzzle_number}.png"))
         log.info("Posted Krillion #%d results for guild %s", day.puzzle_number, day.guild_id)
 
     # -- slash commands --------------------------------------------------
@@ -185,11 +205,13 @@ class KrillionBot(discord.Client):
                 players = {p.user_id: p for p in storage.players(guild_id, ids)}
                 provisional = service.provisional_players(guild_id, ids, as_of_puzzle=n)
                 tiers = {r.user_id: r.tiers for r in storage.results_for(guild_id, n)}
-                await interaction.response.send_message(
-                    daily_leaderboard(n, entries, players, provisional, tiers)
-                )
+                board = final_board(n, entries, players, provisional, tiers)
+                await interaction.response.send_message(**board_message(board, f"krillion-{n}.png"))
                 return
             results = storage.results_for(guild_id, n)
+            if not results:
+                await interaction.response.send_message(f"**Krillion #{n}** — no results yet. 🫧")
+                return
             ids = [r.user_id for r in results]
             players = {p.user_id: p for p in storage.players(guild_id, ids)}
             reset_unix = (
@@ -197,15 +219,16 @@ class KrillionBot(discord.Client):
                 if n == calendar.current(now)
                 else None
             )
+            board = live_board(
+                n,
+                results,
+                players,
+                deltas=service.projected_deltas(guild_id, results),
+                provisional=service.provisional_players(guild_id, ids),
+                reset_unix=reset_unix,
+            )
             await interaction.response.send_message(
-                live_leaderboard(
-                    n,
-                    results,
-                    players,
-                    deltas=service.projected_deltas(guild_id, results),
-                    provisional=service.provisional_players(guild_id, ids),
-                    reset_unix=reset_unix,
-                )
+                **board_message(board, f"krillion-{n}-live.png")
             )
 
         @tree.command(name="elo", description="Krillion Elo rankings for this server.")

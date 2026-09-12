@@ -1,11 +1,9 @@
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
-
-import pytest
 
 from krillion_bot.bot import KrillionBot, build
 from krillion_bot.config import Config
@@ -79,13 +77,6 @@ def make_config(tmp_path: Path, **overrides) -> Config:
     )
     base.update(overrides)
     return Config(**base)
-
-
-@pytest.fixture
-def bot(tmp_path):
-    cfg = make_config(tmp_path)
-    service = KrillionService(Storage(":memory:"), PuzzleCalendar(), grace=timedelta(minutes=10))
-    return KrillionBot(cfg, service)
 
 
 def test_build_registers_commands_and_creates_db(tmp_path):

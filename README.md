@@ -28,6 +28,11 @@ SQLite on disk, ~60 MB RAM, no other services.
   standings for that puzzle with each player's Elo change. It is posted to
   `LEADERBOARD_CHANNEL_ID`, or to the channel the results were shared in.
   Days missed while the bot was offline are closed out on the next start.
+- **Table image**: leaderboards are rendered as a PNG table (rank, name and
+  rating, the result's emoji row, score, Elo change) with Pillow. This needs
+  DejaVu Sans and Noto Color Emoji (`fonts/NotoColorEmoji.ttf`, fetched by
+  the deploy script); if either is missing the same board is sent as text.
+  Rendering takes well under 100 ms and a few MB of RAM.
 - **Elo**: everyone starts at **1200**. Each day every submitter is scored
   against every other submitter (win / draw / loss by score). K is 32, split
   across opponents, so a day can move you at most ±32 and the size of the
@@ -148,7 +153,8 @@ krillion_bot/
   elo.py         multiplayer Elo
   storage.py     SQLite persistence
   service.py     submissions, grace period, closing a day
-  formatting.py  leaderboard text
+  formatting.py  leaderboard rows/text
+  render.py      leaderboard PNG
   bot.py         Discord glue (events, scheduler, slash commands)
 deploy/          deploy.sh, setup-vm.sh, systemd unit
 tests/
