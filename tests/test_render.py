@@ -5,17 +5,19 @@ import pytest
 from test_bot import NOW, FakeInteraction, FakeMessage, run_command
 
 import krillion_bot.render as render
-from krillion_bot.formatting import Board, Row
-from krillion_bot.render import render_board
+from krillion_bot.formatting import RESULT_HEADER, RESULT_RIGHT, Table, result_row
+from krillion_bot.render import render_table
 
-BOARD = Board(
+BOARD = Table(
     "Krillion #58 — live",
+    RESULT_HEADER,
     [
-        Row(1, "alice", "1200?", "🦑🦑🦑🦑🦑🐟🫧", 340, 16.0),
-        Row(2, "bob", "1200?", "🫧🫧🐟🫧🫧🤡⬛", 120, -16.0),
-        Row(3, "carol", "1200?", "", 0, -32.0),
+        result_row(1, "alice", 1200.0, "🦑🦑🦑🦑🦑🐟🫧", 340, 1391.0, 24.1),
+        result_row(2, "bob", 1200.0, "🫧🫧🐟🫧🫧🤡⬛", 120, 1009.0, -24.6),
+        result_row(3, "carol", 1200.0, "", 0, None, -32.0),
     ],
-    ["_? = provisional rating._", "_Closes <t:1800000000:R>._"],
+    RESULT_RIGHT,
+    ["_Only one diver so far._", "_Closes <t:1800000000:R>._"],
 )
 
 HAVE_EMOJI_FONT = any(p.is_file() for p in render.EMOJI_FONT_PATHS)
@@ -30,12 +32,12 @@ def clear_font_cache():
 
 def test_render_without_emoji_font_returns_none(monkeypatch):
     monkeypatch.setattr(render, "EMOJI_FONT_PATHS", (Path("/nonexistent/NotoColorEmoji.ttf"),))
-    assert render_board(BOARD) is None
+    assert render_table(BOARD) is None
 
 
 @pytest.mark.skipif(not HAVE_EMOJI_FONT, reason="Noto Color Emoji font not installed")
 def test_render_produces_png():
-    png = render_board(BOARD)
+    png = render_table(BOARD)
     assert png is not None and png.startswith(b"\x89PNG\r\n\x1a\n")
 
 
@@ -47,7 +49,7 @@ def test_leaderboard_command_falls_back_to_text(bot, monkeypatch):
     run_command(bot, "leaderboard", interaction, None)
     (text, _ephemeral), *_ = interaction.sent
     assert "Krillion #58 — live" in text
-    assert "🥇 **alice** (1200?)  🦑🦑🦑🦑🦑🐟🫧  **340**  +0" in text
+    assert "` 1.`  **alice (1200 E)**  🦑🦑🦑🦑🦑🐟🫧  340  +0" in text
     assert "<t:" in text
 
 

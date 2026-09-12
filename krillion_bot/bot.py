@@ -10,9 +10,10 @@ import discord
 from discord import app_commands
 
 from .config import Config
-from .formatting import Board, elo_leaderboard, final_board, live_board
+from .formatting import Table, final_table, live_table, ratings_table
 from .puzzle import PuzzleCalendar
-from .render import render_board
+from .rating import rank_for_rating
+from .render import render_table
 from .service import FinalizedDay, KrillionService, SubmitStatus
 from .storage import Storage
 
@@ -25,19 +26,19 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def board_message(board: Board, filename: str) -> dict[str, Any]:
-    """kwargs for ``send``: the board as a PNG attachment, or as text if that fails.
+def board_message(table: Table, filename: str) -> dict[str, Any]:
+    """kwargs for ``send``: the table as a PNG attachment, or as text if that fails.
 
     Notes carrying a Discord timestamp can't go in the image, so they stay as text.
     """
     try:
-        png = render_board(board)
+        png = render_table(table)
     except Exception:
         log.exception("Rendering leaderboard image failed; sending text")
         png = None
     if png is None:
-        return {"content": board.text()}
-    timed = [n for n in board.notes if "<t:" in n]
+        return {"content": table.text()}
+    timed = [n for n in table.notes if "<t:" in n]
     return {
         "content": "\n".join(timed) or None,
         "file": discord.File(io.BytesIO(png), filename=filename),
@@ -59,6 +60,9 @@ class KrillionBot(discord.Client):
     # -- lifecycle -------------------------------------------------------
 
     async def setup_hook(self) -> None:
+        replayed = self.service.migrate_ratings()
+        if replayed:
+            log.info("Replayed ratings for %d guild(s) with the current engine", replayed)
         await self.tree.sync()
         self._scheduler = asyncio.create_task(self._finalize_loop(), name="finalize-loop")
 
@@ -178,7 +182,14 @@ class KrillionBot(discord.Client):
             r.user_id: r.tiers
             for r in self.service.storage.results_for(day.guild_id, day.puzzle_number)
         }
-        board = final_board(day.puzzle_number, day.entries, day.players, day.provisional, tiers)
+        board = final_table(
+            day.puzzle_number,
+            self.service.calendar.date_for(day.puzzle_number),
+            day.entries,
+            day.players,
+            tiers,
+            day.decay,
+        )
         await channel.send(**board_message(board, f"krillion-{day.puzzle_number}.png"))
         log.info("Posted Krillion #%d results for guild %s", day.puzzle_number, day.guild_id)
 
@@ -203,9 +214,8 @@ class KrillionBot(discord.Client):
                 entries = storage.history_for(guild_id, n)
                 ids = [e.user_id for e in entries]
                 players = {p.user_id: p for p in storage.players(guild_id, ids)}
-                provisional = service.provisional_players(guild_id, ids, as_of_puzzle=n)
                 tiers = {r.user_id: r.tiers for r in storage.results_for(guild_id, n)}
-                board = final_board(n, entries, players, provisional, tiers)
+                board = final_table(n, calendar.date_for(n), entries, players, tiers)
                 await interaction.response.send_message(**board_message(board, f"krillion-{n}.png"))
                 return
             results = storage.results_for(guild_id, n)
@@ -219,29 +229,33 @@ class KrillionBot(discord.Client):
                 if n == calendar.current(now)
                 else None
             )
-            board = live_board(
+            outcome = service.rate_day(guild_id, n, results)
+            board = live_table(
                 n,
                 results,
                 players,
-                deltas=service.projected_deltas(guild_id, results),
-                provisional=service.provisional_players(guild_id, ids),
+                deltas=outcome.deltas,
+                performances=outcome.performances,
                 reset_unix=reset_unix,
             )
             await interaction.response.send_message(
                 **board_message(board, f"krillion-{n}-live.png")
             )
 
-        @tree.command(name="elo", description="Krillion Elo rankings for this server.")
+        @tree.command(name="elo", description="Krillion rating rankings for this server.")
         async def elo(interaction: discord.Interaction) -> None:
             if interaction.guild_id is None:
                 await interaction.response.send_message("Use this in a server.", ephemeral=True)
                 return
             players = storage.players(interaction.guild_id)
             games = storage.games_played(interaction.guild_id)
-            provisional = service.provisional_players(
-                interaction.guild_id, [p.user_id for p in players]
-            )
-            await interaction.response.send_message(elo_leaderboard(players, games, provisional))
+            table = ratings_table(players, games)
+            if table is None:
+                await interaction.response.send_message(
+                    "No rated divers yet — finish a day first. 🫧"
+                )
+                return
+            await interaction.response.send_message(**board_message(table, "krillion-ratings.png"))
 
         @tree.command(name="stats", description="Krillion stats for you or another diver.")
         @app_commands.describe(member="Whose stats (default: you)")
@@ -262,12 +276,11 @@ class KrillionBot(discord.Client):
             s = storage.stats_for(interaction.guild_id, target.id)
             avg = f"{s.average_score:.0f}" if s.average_score is not None else "—"
             best = str(s.best_score) if s.best_score is not None else "—"
-            rating = f"**{round(player.rating)}**"
-            if service.is_provisional(s.games):
-                rating += f" (provisional, {s.games}/{service.provisional_games} days)"
+            rank = rank_for_rating(round(player.rating))
             await interaction.response.send_message(
                 f"**{player.display_name}** 🦐\n"
-                f"Elo {rating} · {s.games} played · {s.wins} wins\n"
+                f"Rating **{round(player.rating)}** ({rank.title}) · {s.games} played · "
+                f"{s.wins} wins\n"
                 f"Best {best} · Average {avg}"
             )
 
@@ -306,7 +319,7 @@ class KrillionBot(discord.Client):
             if reason:
                 text += f"\nReason: {reason}"
             if outcome.replayed_days:
-                text += f"\nElo recalculated across {outcome.replayed_days} closed day(s)."
+                text += f"\nRatings recalculated across {outcome.replayed_days} closed day(s)."
             else:
                 text += " They can post a corrected result."
             log.info(
@@ -335,8 +348,9 @@ def build(config: Config) -> KrillionBot:
         storage,
         calendar,
         grace=timedelta(minutes=config.late_grace_minutes),
-        k=config.elo_k,
-        provisional_k=config.provisional_k,
-        provisional_games=config.provisional_games,
+        damping=config.rating_damping,
+        decay_base=config.decay_base,
+        decay_max=config.decay_max,
+        decay_grace=config.decay_grace,
     )
     return KrillionBot(config, service)

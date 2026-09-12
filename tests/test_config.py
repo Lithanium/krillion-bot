@@ -22,16 +22,17 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setenv("LEADERBOARD_CHANNEL_ID", "")
     monkeypatch.setenv("RESULTS_CHANNEL_ID", "123")
     monkeypatch.setenv("LATE_GRACE_MINUTES", "5")
-    monkeypatch.setenv("ELO_K", "40")
-    monkeypatch.setenv("ELO_PROVISIONAL_K", "80")
-    monkeypatch.setenv("ELO_PROVISIONAL_GAMES", "3")
+    monkeypatch.setenv("RATING_DAMPING", "0.5")
+    monkeypatch.setenv("RATING_DECAY_BASE", "0.02")
+    monkeypatch.setenv("RATING_DECAY_MAX", "0.1")
+    monkeypatch.setenv("RATING_DECAY_GRACE", "2")
     cfg = Config.from_env()
     assert cfg.token == "abc"
     assert cfg.leaderboard_channel_id is None
     assert cfg.results_channel_id == 123
     assert cfg.late_grace_minutes == 5
-    assert cfg.elo_k == 40
-    assert (cfg.provisional_k, cfg.provisional_games) == (80, 3)
+    assert (cfg.rating_damping, cfg.decay_base, cfg.decay_max) == (0.5, 0.02, 0.1)
+    assert cfg.decay_grace == 2
     assert cfg.admin_user_ids == {750888871696269402}
     assert str(cfg.puzzle_tz) == "America/New_York"
 

@@ -2,7 +2,7 @@
 
 A small Discord bot for groups that play [Krillion.io](https://krillion.io) daily.
 Paste your result in Discord, the bot records it, posts a leaderboard when the
-puzzle closes and keeps an Elo rating for everyone.
+puzzle closes and keeps a Codeforces-style rating for everyone.
 
 ```
 Krillion #58 🦐
@@ -25,32 +25,40 @@ SQLite on disk, ~60 MB RAM, no other services.
   for `LATE_GRACE_MINUTES` (default 10) after the reset, so a paste at 2:03pm
   isn't lost.
 - **Daily leaderboard**: once the grace period ends the bot posts the final
-  standings for that puzzle with each player's Elo change. It is posted to
+  standings for that puzzle with each player's rating change. It is posted to
   `LEADERBOARD_CHANNEL_ID`, or to the channel the results were shared in.
   Days missed while the bot was offline are closed out on the next start.
 - **Table image**: leaderboards are rendered as a PNG table (rank, name and
-  rating, the result's emoji row, score, Elo change) with Pillow. This needs
+  rating rank, the result's emoji row, score, performance, rating change) in
+  the style of the Queens bot, with Pillow. This needs
   DejaVu Sans and Noto Color Emoji (`fonts/NotoColorEmoji.ttf`, fetched by
   the deploy script); if either is missing the same board is sent as text.
   Rendering takes well under 100 ms and a few MB of RAM.
-- **Elo**: everyone starts at **1200**. Each day every submitter is scored
-  against every other submitter (win / draw / loss by score). K is 32, split
-  across opponents, so a day can move you at most ±32 and the size of the
-  change depends on who else played and how strong they are. A day with a
-  single submitter changes nothing.
-- **Provisional ratings**: a player's first 5 rated days use K = 64 (max
-  ±64/day) so new divers reach their real level fast. They're shown with a
-  `?` after the rating (e.g. `1264?`) until established.
+- **Rating**: the Codeforces-style contest rating used by the Queens bot in
+  [mklol/tle-gf](https://github.com/mklol/tle-gf). Everyone starts at
+  **1200**. Each day is one contest: submitters are ranked by score (ties
+  share a rank), each player's expected seed is computed from the whole
+  field, and the rating moves halfway towards the rating that would have
+  predicted their actual rank, then the field is corrected so it doesn't
+  inflate and the result is damped by `RATING_DAMPING`. Every row also gets a
+  *performance* — the rating that day's result was worth. Rating ranks follow
+  the Codeforces ladder (Newbie < 1000, Pupil, Specialist, Expert 1200+,
+  Candidate Master 1300+, Master 1400+, …, Legendary Grandmaster 2000+). A
+  day with a single submitter changes nothing.
+- **Inactivity decay**: a rated diver who sits out a day drifts back towards
+  1200 (`RATING_DECAY_BASE` of the excess per missed day, growing with the
+  streak up to `RATING_DECAY_MAX`; nobody below 1200 drifts *up*). The points
+  lost are shared out among that day's submitters.
 - **Slash commands**
   - `/leaderboard [puzzle]` – live scores for today (or the final table for a
     past puzzle number)
-  - `/elo` – Elo rankings
+  - `/elo` – rating rankings
   - `/stats [member]` – rating, games, wins, best and average score
   - `/puzzle` – which puzzle is live and when it resets (shown in each user's
     local time)
   - `/invalidate <member> [puzzle] [reason]` – **admins only**: remove a
     misreported score. If the day is still open the player can repost; if it
-    was already closed, every closed day's Elo is replayed from the remaining
+    was already closed, every closed day's rating is replayed from the remaining
     results so ratings stay consistent.
 - **Admins** are the Discord user IDs in `ADMIN_USER_IDS` (default:
   `750888871696269402`).
@@ -134,9 +142,10 @@ All settings live in `.env` (see `.env.example`):
 | `RESULTS_CHANNEL_ID` | empty | Only read results from this channel; empty = all channels |
 | `DATABASE_PATH` | `data/krillion.sqlite3` | SQLite file |
 | `LATE_GRACE_MINUTES` | `10` | How long after reset the previous puzzle is still accepted |
-| `ELO_K` | `32` | Elo K-factor (max daily swing) |
-| `ELO_PROVISIONAL_K` | `64` | K-factor during a player's provisional period |
-| `ELO_PROVISIONAL_GAMES` | `5` | Rated days before a player is established |
+| `RATING_DAMPING` | `0.25` | Fraction of the raw contest delta applied each day |
+| `RATING_DECAY_BASE` | `0.04` | Share of a resting diver's excess over 1200 lost on the first missed day |
+| `RATING_DECAY_MAX` | `0.08` | Cap on the per-day decay share as a streak grows |
+| `RATING_DECAY_GRACE` | `0` | Missed days before decay starts |
 | `ADMIN_USER_IDS` | `750888871696269402` | Comma-separated user IDs allowed to run admin commands |
 | `KRILLION_TIMEZONE` | `America/New_York` | Timezone the game resets in |
 | `KRILLION_EPOCH_DATE` | `2026-07-16` | Date of Krillion #1 |
@@ -150,7 +159,7 @@ the game changes.
 krillion_bot/
   parser.py      share-text parser
   puzzle.py      puzzle number <-> date, reset times
-  elo.py         multiplayer Elo
+  rating.py      Codeforces/Queens-bot contest rating, performance, ranks, decay
   storage.py     SQLite persistence
   service.py     submissions, grace period, closing a day
   formatting.py  leaderboard rows/text

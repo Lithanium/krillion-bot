@@ -1,24 +1,23 @@
-"""Discord-agnostic game logic: accept submissions, close days, run Elo."""
+"""Discord-agnostic game logic: accept submissions, close days, run the rating."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 
-from .elo import (
-    DEFAULT_K,
-    PROVISIONAL_GAMES,
-    PROVISIONAL_K,
-    is_provisional,
-    k_factor,
-    placements,
-    rating_deltas,
-)
 from .parser import ParsedResult, parse_result
 from .puzzle import PuzzleCalendar
-from .storage import Player, RatingEntry, Result, Storage
+from .rating import (
+    DAMPING,
+    DECAY_BASE,
+    DECAY_GRACE,
+    DECAY_MAX,
+    DayOutcome,
+    close_day,
+    placements,
+)
+from .storage import RATING_ENGINE, Player, RatingEntry, Result, Storage
 
 
 class SubmitStatus(Enum):
@@ -44,8 +43,8 @@ class FinalizedDay:
     channel_id: int
     entries: list[RatingEntry]
     players: dict[int, Player]
-    provisional: frozenset[int]
-    """Players still provisional after this day."""
+    decay: dict[int, float]
+    """Rating lost by each absent player (shared out to the day's submitters)."""
 
 
 @dataclass(frozen=True)
@@ -62,26 +61,31 @@ class KrillionService:
         calendar: PuzzleCalendar | None = None,
         *,
         grace: timedelta = timedelta(minutes=10),
-        k: float = DEFAULT_K,
-        provisional_k: float = PROVISIONAL_K,
-        provisional_games: int = PROVISIONAL_GAMES,
+        damping: float = DAMPING,
+        decay_base: float = DECAY_BASE,
+        decay_max: float = DECAY_MAX,
+        decay_grace: int = DECAY_GRACE,
     ) -> None:
         self.storage = storage
         self.calendar = calendar or PuzzleCalendar()
         self.grace = grace
-        self.k = k
-        self.provisional_k = provisional_k
-        self.provisional_games = provisional_games
+        self.damping = damping
+        self.decay_base = decay_base
+        self.decay_max = decay_max
+        self.decay_grace = decay_grace
 
-    def is_provisional(self, games_played: int) -> bool:
-        return is_provisional(games_played, self.provisional_games)
+    def migrate_ratings(self) -> int:
+        """Replay every guild if the stored history came from an older rating engine.
 
-    def provisional_players(
-        self, guild_id: int, user_ids: Iterable[int], *, as_of_puzzle: int | None = None
-    ) -> frozenset[int]:
-        """Which of ``user_ids`` are provisional (optionally right after ``as_of_puzzle``)."""
-        games = self.storage.games_played(guild_id, as_of_puzzle)
-        return frozenset(uid for uid in user_ids if self.is_provisional(games.get(uid, 0)))
+        Returns the number of guilds replayed.
+        """
+        if self.storage.get_meta("rating_engine") == RATING_ENGINE:
+            return 0
+        guilds = self.storage.guild_ids()
+        for guild_id in guilds:
+            self.replay(guild_id)
+        self.storage.set_meta("rating_engine", RATING_ENGINE)
+        return len(guilds)
 
     # -- submissions -----------------------------------------------------
 
@@ -129,19 +133,29 @@ class KrillionService:
 
     # -- finalization ----------------------------------------------------
 
-    def projected_deltas(self, guild_id: int, results: list[Result]) -> dict[int, float]:
-        """Rating change each submitter would get if ``results`` closed the day now."""
+    def rate_day(self, guild_id: int, puzzle_number: int, results: list[Result]) -> DayOutcome:
+        """What closing ``puzzle_number`` with ``results`` does to everyone's rating."""
         players = {
             p.user_id: p for p in self.storage.players(guild_id, [r.user_id for r in results])
         }
         scores = {r.user_id: r.score for r in results}
         ratings = {uid: players[uid].rating for uid in scores}
-        games = self.storage.games_played(guild_id)
-        ks = {
-            uid: k_factor(games.get(uid, 0), self.k, self.provisional_k, self.provisional_games)
-            for uid in scores
-        }
-        return rating_deltas(ratings, scores, ks)
+        absent = self.storage.absentees(guild_id, puzzle_number, scores)
+        return close_day(
+            scores,
+            ratings,
+            absent,
+            damping=self.damping,
+            decay_base=self.decay_base,
+            decay_max=self.decay_max,
+            decay_grace=self.decay_grace,
+        )
+
+    def projected_deltas(
+        self, guild_id: int, puzzle_number: int, results: list[Result]
+    ) -> dict[int, float]:
+        """Rating change each submitter would get if ``results`` closed the day now."""
+        return self.rate_day(guild_id, puzzle_number, results).deltas
 
     def next_finalize_at(self, now: datetime) -> datetime:
         return self.calendar.next_reset(now) + self.grace
@@ -162,8 +176,7 @@ class KrillionService:
         }
         scores = {r.user_id: r.score for r in results}
         ratings = {uid: players[uid].rating for uid in scores}
-        games = self.storage.games_played(guild_id)
-        deltas = self.projected_deltas(guild_id, results)
+        outcome = self.rate_day(guild_id, puzzle_number, results)
         places = placements(scores)
         entries = [
             RatingEntry(
@@ -172,11 +185,12 @@ class KrillionService:
                 score=r.score,
                 placement=places[r.user_id],
                 rating_before=ratings[r.user_id],
-                rating_after=ratings[r.user_id] + deltas[r.user_id],
+                rating_after=ratings[r.user_id] + outcome.deltas[r.user_id],
+                performance=outcome.performances[r.user_id],
             )
             for r in results
         ]
-        self.storage.finalize(guild_id, puzzle_number, entries, now)
+        self.storage.finalize(guild_id, puzzle_number, entries, now, outcome.decay)
         # Post to the channel the day's results were mostly shared in.
         channel_counts: dict[int, int] = {}
         for r in results:
@@ -185,13 +199,12 @@ class KrillionService:
         updated = {
             p.user_id: p for p in self.storage.players(guild_id, [r.user_id for r in results])
         }
-        provisional = frozenset(uid for uid in scores if self.is_provisional(games.get(uid, 0) + 1))
-        return FinalizedDay(guild_id, puzzle_number, channel_id, entries, updated, provisional)
+        return FinalizedDay(guild_id, puzzle_number, channel_id, entries, updated, outcome.decay)
 
     # -- admin -----------------------------------------------------------
 
     def invalidate(self, guild_id: int, puzzle_number: int, user_id: int) -> Invalidation | None:
-        """Drop a user's result. If that day was already closed, replay Elo from scratch."""
+        """Drop a user's result. If that day was already closed, replay ratings from scratch."""
         removed = self.storage.remove_result(guild_id, puzzle_number, user_id)
         if removed is None:
             return None
@@ -200,7 +213,7 @@ class KrillionService:
         return Invalidation(removed, self.replay(guild_id))
 
     def replay(self, guild_id: int) -> int:
-        """Recompute every closed day's Elo from the stored results, in order.
+        """Recompute every closed day's rating from the stored results, in order.
 
         Returns how many days were re-finalized. A day left with no results stays open
         (it no longer appears in history), but is still too old to accept submissions.

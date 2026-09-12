@@ -47,9 +47,10 @@ class Config:
     leaderboard_channel_id: int | None
     results_channel_id: int | None
     late_grace_minutes: int
-    elo_k: float
-    provisional_k: float
-    provisional_games: int
+    rating_damping: float
+    decay_base: float
+    decay_max: float
+    decay_grace: int
     puzzle_tz: ZoneInfo
     epoch_date: date
     log_level: str
@@ -66,9 +67,10 @@ class Config:
             leaderboard_channel_id=_int_or_none(os.environ.get("LEADERBOARD_CHANNEL_ID")),
             results_channel_id=_int_or_none(os.environ.get("RESULTS_CHANNEL_ID")),
             late_grace_minutes=int(os.environ.get("LATE_GRACE_MINUTES", "10")),
-            elo_k=float(os.environ.get("ELO_K", "32")),
-            provisional_k=float(os.environ.get("ELO_PROVISIONAL_K", "64")),
-            provisional_games=int(os.environ.get("ELO_PROVISIONAL_GAMES", "5")),
+            rating_damping=float(os.environ.get("RATING_DAMPING", "0.25")),
+            decay_base=float(os.environ.get("RATING_DECAY_BASE", "0.04")),
+            decay_max=float(os.environ.get("RATING_DECAY_MAX", "0.08")),
+            decay_grace=int(os.environ.get("RATING_DECAY_GRACE", "0")),
             puzzle_tz=ZoneInfo(os.environ.get("KRILLION_TIMEZONE", "America/New_York")),
             epoch_date=date.fromisoformat(os.environ.get("KRILLION_EPOCH_DATE", "2026-07-16")),
             log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),

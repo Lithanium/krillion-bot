@@ -3,10 +3,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from krillion_bot.formatting import daily_leaderboard, elo_leaderboard, live_leaderboard
+from krillion_bot.formatting import final_table, live_table, ratings_table
 from krillion_bot.puzzle import PuzzleCalendar
+from krillion_bot.rating import compute_round
 from krillion_bot.service import KrillionService, SubmitStatus
-from krillion_bot.storage import Storage
+from krillion_bot.storage import RATING_ENGINE, Storage
 
 AEST = ZoneInfo("Australia/Brisbane")
 GUILD = 1
@@ -22,17 +23,12 @@ def share(n: int, score: int) -> str:
     return f"Krillion #{n} 🦐\n{score}\n\n🦑🦑🦑🦑🦑🐟🫧"
 
 
+# Head-to-head between two 1200s: what the Queens-bot engine hands the winner/loser.
+WIN, LOSE = compute_round({1: 1200.0, 2: 1200.0}, {1: 1, 2: 2}).values()
+
+
 @pytest.fixture
 def service() -> KrillionService:
-    """Service with the provisional phase disabled (plain K=32)."""
-    return KrillionService(
-        Storage(":memory:"), PuzzleCalendar(), grace=timedelta(minutes=10), provisional_games=0
-    )
-
-
-@pytest.fixture
-def provisional_service() -> KrillionService:
-    """Defaults: first 5 rated days use K=64."""
     return KrillionService(Storage(":memory:"), PuzzleCalendar(), grace=timedelta(minutes=10))
 
 
@@ -94,7 +90,7 @@ def test_nothing_due_while_day_open(service):
     assert service.next_finalize_at(DURING_58) == RESET_59 + timedelta(minutes=10)
 
 
-def test_finalize_applies_elo_and_posts_once(service):
+def test_finalize_applies_rating_and_posts_once(service):
     submit(service, 1, "alice", share(58, 340))
     submit(service, 2, "bob", share(58, 120))
     submit(service, 3, "carol", share(58, 120))
@@ -107,12 +103,15 @@ def test_finalize_applies_elo_and_posts_once(service):
     by_user = {e.user_id: e for e in day.entries}
     assert by_user[1].placement == 1
     assert by_user[2].placement == 2 and by_user[3].placement == 2
-    assert by_user[1].delta == pytest.approx(16)
-    assert by_user[2].delta == pytest.approx(-8)
-    assert by_user[3].delta == pytest.approx(-8)
-    assert service.storage.get_player(GUILD, 1).rating == pytest.approx(1216)
-    assert service.storage.get_player(GUILD, 2).rating == pytest.approx(1192)
-    assert day.provisional == frozenset()
+    expected = compute_round({1: 1200.0, 2: 1200.0, 3: 1200.0}, {1: 1, 2: 2, 3: 2})
+    assert {u: e.delta for u, e in by_user.items()} == pytest.approx(expected)
+    assert by_user[2].performance == by_user[3].performance
+    assert by_user[1].performance > by_user[2].performance
+    assert service.storage.get_player(GUILD, 1).rating == pytest.approx(1200 + expected[1])
+    assert service.storage.history_for(GUILD, 58)[0].performance == pytest.approx(
+        by_user[1].performance
+    )
+    assert day.decay == {}
 
     # Idempotent: a second pass does nothing, and late results are refused.
     assert service.finalize_due(close + timedelta(hours=1)) == []
@@ -127,51 +126,71 @@ def test_finalizes_missed_days_after_downtime(service):
     submit(service, 2, "bob", share(59, 250), now=RESET_59 + timedelta(hours=2))
     days = service.finalize_due(later)
     assert [d.puzzle_number for d in days] == [58, 59]
-    # alice won #58 (+16) then lost #59 to a slightly lower-rated bob.
+    # alice won #58 then lost #59 to a now slightly lower-rated bob.
     alice = service.storage.get_player(GUILD, 1).rating
     bob = service.storage.get_player(GUILD, 2).rating
-    assert alice < 1216 and bob > 1184
-    assert alice + bob == pytest.approx(2400)
+    assert alice < 1200 + WIN and bob > 1200 + LOSE
+    assert bob > alice
 
 
-def test_provisional_players_use_higher_k(provisional_service):
-    service = provisional_service
+def test_live_projection_matches_finalization(service):
     submit(service, 1, "alice", share(58, 340))
     submit(service, 2, "bob", share(58, 120))
+    submit(service, 3, "carol", share(58, 250))
+    results = service.storage.results_for(GUILD, 58)
+    projected = service.rate_day(GUILD, 58, results)
+    assert projected.deltas == pytest.approx(service.projected_deltas(GUILD, 58, results))
     day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
-    assert day.provisional == {1, 2}
-    assert service.storage.get_player(GUILD, 1).rating == pytest.approx(1232)
-    assert service.storage.get_player(GUILD, 2).rating == pytest.approx(1168)
-    assert service.provisional_players(GUILD, [1, 2]) == {1, 2}
-    assert service.provisional_players(GUILD, [1, 2], as_of_puzzle=57) == {1, 2}
+    assert {e.user_id: e.delta for e in day.entries} == pytest.approx(projected.deltas)
+    assert {e.user_id: e.performance for e in day.entries} == pytest.approx(projected.performances)
 
 
-def test_player_becomes_established_after_five_days(provisional_service):
-    service = provisional_service
+def test_solo_day_changes_nothing(service):
+    submit(service, 1, "alice", share(58, 340))
+    day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
+    assert day.entries[0].delta == 0 and day.entries[0].performance is None
+    assert service.storage.get_player(GUILD, 1).rating == 1200
+
+
+def test_absent_players_decay_towards_1200_and_pay_the_active(service):
     cal = service.calendar
-    # alice and bob tie every day, so ratings stay 1200 and only the game count matters.
-    for n in range(58, 63):
-        now = cal.start(n) + timedelta(hours=1)
-        submit(service, 1, "alice", share(n, 300), now=now)
-        submit(service, 2, "bob", share(n, 300), now=now)
-        service.finalize_due(cal.end(n) + timedelta(minutes=10))
-    assert service.storage.games_played(GUILD) == {1: 5, 2: 5}
-    assert service.provisional_players(GUILD, [1, 2]) == frozenset()
-    assert service.provisional_players(GUILD, [1, 2], as_of_puzzle=61) == {1, 2}
-
-    # Day 6: carol is new (K=64) while alice and bob are established (K=32).
-    now = cal.start(63) + timedelta(hours=1)
-    submit(service, 1, "alice", share(63, 500), now=now)
-    submit(service, 2, "bob", share(63, 300), now=now)
-    submit(service, 3, "carol", share(63, 100), now=now)
-    day = service.finalize_due(cal.end(63) + timedelta(minutes=10))[0]
-    assert day.provisional == {3}
+    # #58: alice beats bob, so alice > 1200 > bob. #59: only bob and carol play.
+    submit(service, 1, "alice", share(58, 340))
+    submit(service, 2, "bob", share(58, 120))
+    service.finalize_due(cal.end(58) + timedelta(minutes=10))
+    alice_before = service.storage.get_player(GUILD, 1).rating
+    now59 = cal.start(59) + timedelta(hours=1)
+    submit(service, 2, "bob", share(59, 100), now=now59)
+    submit(service, 3, "carol", share(59, 200), now=now59)
+    assert service.storage.absentees(GUILD, 59, [2, 3]) == {1: (alice_before, 1)}
+    day = service.finalize_due(cal.end(59) + timedelta(minutes=10))[0]
+    lost = 0.04 * (alice_before - 1200)
+    assert day.decay == {1: pytest.approx(-lost)}
+    assert service.storage.get_player(GUILD, 1).rating == pytest.approx(alice_before - lost)
+    contest = compute_round({2: 1200 + LOSE, 3: 1200.0}, {2: 2, 3: 1})
     deltas = {e.user_id: e.delta for e in day.entries}
-    # alice beats two equal-rated opponents: 32/2 * (0.5 + 0.5) = +16
-    assert deltas[1] == pytest.approx(16)
-    assert deltas[2] == pytest.approx(0)
-    # carol loses both with K=64: 64/2 * (-0.5 - 0.5) = -32
-    assert deltas[3] == pytest.approx(-32)
+    assert deltas[2] == pytest.approx(contest[2] + lost / 2)
+    assert deltas[3] == pytest.approx(contest[3] + lost / 2)
+    # Bob sat out #60 while below 1200: no upward drift, streak counted from his last game.
+    now60 = cal.start(60) + timedelta(hours=1)
+    submit(service, 3, "carol", share(60, 100), now=now60)
+    submit(service, 4, "dave", share(60, 200), now=now60)
+    absent = service.storage.absentees(GUILD, 60, [3, 4])
+    assert absent[1][1] == 2 and absent[2][1] == 1
+    day60 = service.finalize_due(cal.end(60) + timedelta(minutes=10))[0]
+    assert day60.decay[2] == 0.0 and day60.decay[1] < 0
+
+
+def test_migrate_ratings_replays_once(service):
+    submit(service, 1, "alice", share(58, 340))
+    submit(service, 2, "bob", share(58, 120))
+    service.finalize_due(RESET_59 + timedelta(minutes=10))
+    # Simulate history written by the old pairwise engine.
+    service.storage._conn.execute("UPDATE players SET rating = 1216 WHERE user_id = 1")
+    assert service.migrate_ratings() == 1
+    assert service.storage.get_player(GUILD, 1).rating == pytest.approx(1200 + WIN)
+    assert service.storage.get_meta("rating_engine") == RATING_ENGINE
+    assert service.migrate_ratings() == 0
 
 
 def test_invalidate_open_day_allows_resubmit(service):
@@ -183,7 +202,7 @@ def test_invalidate_open_day_allows_resubmit(service):
     assert submit(service, 1, "alice", share(58, 340)).status is SubmitStatus.ACCEPTED
 
 
-def test_invalidate_closed_day_replays_elo(service):
+def test_invalidate_closed_day_replays_ratings(service):
     cal = service.calendar
     # #58: alice 340, bob 120, mallory 700 (bogus). #59: alice 200 vs bob 250.
     submit(service, 1, "alice", share(58, 340))
@@ -194,13 +213,13 @@ def test_invalidate_closed_day_replays_elo(service):
     submit(service, 1, "alice", share(59, 200), now=now59)
     submit(service, 2, "bob", share(59, 250), now=now59)
     service.finalize_due(cal.end(59) + timedelta(minutes=10))
-    assert service.storage.get_player(GUILD, 3).rating == pytest.approx(1216)
+    assert service.storage.get_player(GUILD, 3).rating > 1200
 
     out = service.invalidate(GUILD, 58, 3)
     assert out is not None and out.replayed_days == 2
 
     # Same ratings as if mallory had never played #58.
-    clean = KrillionService(Storage(":memory:"), PuzzleCalendar(), provisional_games=0)
+    clean = KrillionService(Storage(":memory:"), PuzzleCalendar())
     submit(clean, 1, "alice", share(58, 340))
     submit(clean, 2, "bob", share(58, 120))
     clean.finalize_due(cal.end(58) + timedelta(minutes=10))
@@ -260,37 +279,72 @@ def test_formatting(service):
     submit(service, 2, "bob", share(58, 120))
     results = service.storage.results_for(GUILD, 58)
     players = {p.user_id: p for p in service.storage.players(GUILD)}
-    deltas = service.projected_deltas(GUILD, results)
-    live = live_leaderboard(58, results, players, deltas=deltas, reset_unix=1_800_000_000)
-    assert "Krillion #58 — live" in live
-    assert "🥇 **alice** (1200)  🦑🦑🦑🦑🦑🐟🫧  **340**  +16" in live
-    assert "🥈 **bob** (1200)  🦑🦑🦑🦑🦑🐟🫧  **120**  -16" in live
-    assert "<t:1800000000:R>" in live
-    assert live_leaderboard(59, [], players) == "**Krillion #59** — no results yet. 🫧"
+    outcome = service.rate_day(GUILD, 58, results)
+    live = live_table(
+        58,
+        results,
+        players,
+        deltas=outcome.deltas,
+        performances=outcome.performances,
+        reset_unix=1_800_000_000,
+    )
+    assert live.header == ("#", "Name", "Result", "Score", "Perf", "Δ")
+    assert [c.text for c in live.rows[0]] == [
+        "1",
+        "alice (1200 E)",
+        "🦑🦑🦑🦑🦑🐟🫧",
+        "340",
+        "1391",
+        "+24",
+    ]
+    assert [c.text for c in live.rows[1]] == [
+        "2",
+        "bob (1200 E)",
+        "🦑🦑🦑🦑🦑🐟🫧",
+        "120",
+        "1009",
+        "-25",
+    ]
+    assert live.rows[0][1].color == live.rows[1][1].color == (0, 0, 255)
+    assert live.rows[0][4].color == (170, 0, 170) and live.rows[1][4].color == (0, 128, 0)
+    assert live.rows[0][5].color == (0, 128, 0) and live.rows[1][5].color == (128, 128, 128)
+    text = live.text()
+    assert text.startswith("**Krillion #58 — live** 🦐\n")
+    assert "` 1.`  **alice (1200 E)**  🦑🦑🦑🦑🦑🐟🫧  340  1391  +24" in text
+    assert "<t:1800000000:R>" in text
 
     day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
     tiers = {r.user_id: r.tiers for r in results}
-    final = daily_leaderboard(58, day.entries, day.players, tiers=tiers)
-    assert "Krillion #58 — final results" in final
-    assert "🥇 **alice** (1200 → 1216)  🦑🦑🦑🦑🦑🐟🫧  **340**  +16" in final
-    assert "🥈 **bob** (1200 → 1184)  🦑🦑🦑🦑🦑🐟🫧  **120**  -16" in final
+    final = final_table(58, service.calendar.date_for(58), day.entries, day.players, tiers)
+    assert final.title == "Krillion #58 2026-09-11 Results"
+    assert [c.text for c in final.rows[0]] == [c.text for c in live.rows[0]]
+    assert final.notes == []
 
-    board = elo_leaderboard(service.storage.players(GUILD), service.storage.games_played(GUILD))
-    assert board.splitlines()[1] == "🥇 **alice** — 1216  (1 played)"
-    assert "provisional" not in board
+    table = ratings_table(service.storage.players(GUILD), service.storage.games_played(GUILD))
+    assert table is not None and table.header == ("#", "Name", "Rating", "Games")
+    assert [c.text for c in table.rows[0]] == ["1", "alice", "1224 · E", "1"]
+    assert [c.text for c in table.rows[1]] == ["2", "bob", "1175 · S", "1"]
+    assert ratings_table([], {}) is None
 
 
-def test_formatting_marks_provisional(provisional_service):
-    service = provisional_service
+def test_formatting_notes(service):
     submit(service, 1, "alice", share(58, 340))
-    submit(service, 2, "bob", share(58, 120))
+    results = service.storage.results_for(GUILD, 58)
+    players = {p.user_id: p for p in service.storage.players(GUILD)}
+    live = live_table(58, results, players, deltas={1: 0.0}, performances={1: None})
+    assert [c.text for c in live.rows[0]] == [
+        "1",
+        "alice (1200 E)",
+        "🦑🦑🦑🦑🦑🐟🫧",
+        "340",
+        "",
+        "+0",
+    ]
+    assert live.notes == ["_Only one diver so far, so no rating change yet._"]
     day = service.finalize_due(RESET_59 + timedelta(minutes=10))[0]
-    final = daily_leaderboard(58, day.entries, day.players, day.provisional)
-    assert "🥇 **alice** (1200 → 1232?)  " in final and "  **340**  +32" in final
-    assert "🥈 **bob** (1200 → 1168?)  " in final and "  **120**  -32" in final
-    assert final.splitlines()[-1].startswith("_? = provisional rating")
-
-    players = service.storage.players(GUILD)
-    board = elo_leaderboard(players, service.storage.games_played(GUILD), {1})
-    assert "🥇 **alice** — 1232?  (1 played)" in board
-    assert "🥈 **bob** — 1168  (1 played)" in board
+    final = final_table(58, service.calendar.date_for(58), day.entries, day.players, {}, day.decay)
+    assert final.notes == ["_Only one diver today, so no rating change._"]
+    decayed = final_table(
+        58, service.calendar.date_for(58), day.entries, day.players, {}, {7: -8.0, 8: 0.0}
+    )
+    assert decayed.notes[-1] == "_Δ includes +8 each from 1 inactive diver's rating decay._"
