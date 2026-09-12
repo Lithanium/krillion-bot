@@ -86,11 +86,20 @@ From your machine, with `.env` filled in:
 # or:  make deploy HOST=ubuntu@<vm-public-ip> KEY=~/.ssh/<your-oracle-key>
 ```
 
+(Use `opc@` instead of `ubuntu@` on an Oracle Linux image.)
+
 The script copies the repo to `~/krillion-bot` on the VM, seeds `.env` from
-your local one (only if the VM doesn't already have one), installs Python and
-the dependencies into a venv, installs a hardened `systemd` service
-(`deploy/krillion-bot.service`) and starts it. Re-run the same command to
-deploy updates — the database in `~/krillion-bot/data/` is untouched.
+your local one (only if the VM doesn't already have one), adds a 2 GB swapfile
+if the VM has none, installs Python and the dependencies into a venv, installs
+a hardened `systemd` service (`deploy/krillion-bot.service`) and starts it.
+Re-run the same command to deploy updates — the database in
+`~/krillion-bot/data/` is untouched.
+
+The 1 GB micro shape is slow: the first run can take 5–10 minutes while the
+package manager works (later runs skip it). If the VM stops answering ssh
+during a first deploy it has run out of memory — reboot it from the Oracle
+console and re-run the deploy; the swapfile is created before anything heavy
+runs so it won't happen twice.
 
 On the VM:
 
