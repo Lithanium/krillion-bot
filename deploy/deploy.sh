@@ -5,7 +5,9 @@
 #   ./deploy/deploy.sh ubuntu@203.0.113.7 ~/.ssh/oracle.key
 #
 # Copies this checkout (git-tracked files + your local .env if the VM has none)
-# to ~/krillion-bot on the VM and runs deploy/setup-vm.sh there.
+# to /opt/krillion-bot on the VM and runs deploy/setup-vm.sh there.
+# (/opt rather than $HOME: on SELinux systems such as Oracle Linux, systemd
+# cannot read unit inputs like EnvironmentFile out of a home directory.)
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
@@ -15,7 +17,7 @@ fi
 
 HOST="$1"
 KEY="${2:-}"
-APP_DIR="${APP_DIR:-krillion-bot}"   # relative to the remote user's home
+APP_DIR="${APP_DIR:-/opt/krillion-bot}"
 
 SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 if [ -n "$KEY" ]; then
@@ -25,24 +27,24 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-echo "==> Uploading to $HOST:~/$APP_DIR"
-"${SSH[@]}" "$HOST" "mkdir -p ~/$APP_DIR"
+echo "==> Uploading to $HOST:$APP_DIR"
+"${SSH[@]}" "$HOST" "sudo mkdir -p '$APP_DIR' && sudo chown \"\$(id -un)\" '$APP_DIR'"
 # Ship the working tree minus anything gitignored (no venv, db or .env).
 git ls-files -z --cached --others --exclude-standard \
     | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done \
     | tar --null -T - -czf - \
-    | "${SSH[@]}" "$HOST" "tar -xzf - -C ~/$APP_DIR"
+    | "${SSH[@]}" "$HOST" "tar -xzf - -C '$APP_DIR'"
 
 if [ -f .env ]; then
     # Only seed the remote .env once; never clobber a token that is already there.
-    if ! "${SSH[@]}" "$HOST" "test -s ~/$APP_DIR/.env"; then
+    if ! "${SSH[@]}" "$HOST" "test -s '$APP_DIR/.env'"; then
         echo "==> Seeding remote .env from local .env"
-        "${SSH[@]}" "$HOST" "cat > ~/$APP_DIR/.env && chmod 600 ~/$APP_DIR/.env" < .env
+        "${SSH[@]}" "$HOST" "cat > '$APP_DIR/.env' && chmod 600 '$APP_DIR/.env'" < .env
     fi
 fi
 
 echo "==> Running setup on the VM"
-"${SSH[@]}" -t "$HOST" "APP_DIR=\$HOME/$APP_DIR bash ~/$APP_DIR/deploy/setup-vm.sh"
+"${SSH[@]}" -t "$HOST" "APP_DIR='$APP_DIR' bash '$APP_DIR/deploy/setup-vm.sh'"
 
 echo
 echo "Done. Useful commands:"

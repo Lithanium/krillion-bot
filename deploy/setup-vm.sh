@@ -3,7 +3,7 @@
 # Installs python + venv, deps, the systemd unit, then (re)starts the bot.
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-$HOME/krillion-bot}"
+APP_DIR="${APP_DIR:-/opt/krillion-bot}"
 SERVICE=krillion-bot
 RUN_USER="$(id -un)"
 
@@ -61,6 +61,15 @@ if [ ! -f .env ]; then
     echo
 fi
 chmod 600 .env
+
+if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ]; then
+    # systemd may only read service inputs labelled for the system (usr_t) and
+    # only execute binaries labelled bin_t. -h: never relabel symlink targets
+    # (.venv/bin/python3.x points at the system interpreter).
+    echo "==> Applying SELinux labels"
+    sudo chcon -R -h -t usr_t "$APP_DIR"
+    sudo chcon -R -h -t bin_t "$APP_DIR/.venv/bin"
+fi
 
 echo "==> Installing systemd unit"
 sed -e "s|__APP_DIR__|$APP_DIR|g" -e "s|__USER__|$RUN_USER|g" \

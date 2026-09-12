@@ -88,12 +88,14 @@ From your machine, with `.env` filled in:
 
 (Use `opc@` instead of `ubuntu@` on an Oracle Linux image.)
 
-The script copies the repo to `~/krillion-bot` on the VM, seeds `.env` from
+The script copies the repo to `/opt/krillion-bot` on the VM, seeds `.env` from
 your local one (only if the VM doesn't already have one), adds a 2 GB swapfile
 if the VM has none, installs Python and the dependencies into a venv, installs
 a hardened `systemd` service (`deploy/krillion-bot.service`) and starts it.
 Re-run the same command to deploy updates — the database in
-`~/krillion-bot/data/` is untouched.
+`/opt/krillion-bot/data/` is untouched. On Oracle Linux (SELinux enforcing) the
+app directory is also relabelled so systemd is allowed to read `.env` and run
+the venv — this is why it lives in `/opt` rather than your home directory.
 
 The 1 GB micro shape is slow: the first run can take 5–10 minutes while the
 package manager works (later runs skip it). If the VM stops answering ssh
@@ -107,10 +109,10 @@ On the VM:
 sudo journalctl -u krillion-bot -f        # logs
 sudo systemctl restart krillion-bot       # restart
 sudo systemctl status krillion-bot
-nano ~/krillion-bot/.env                  # change config, then restart
+nano /opt/krillion-bot/.env               # change config, then restart
 ```
 
-If you didn't have a local `.env`, ssh in, edit `~/krillion-bot/.env`, set
+If you didn't have a local `.env`, ssh in, edit `/opt/krillion-bot/.env`, set
 `DISCORD_TOKEN`, and `sudo systemctl restart krillion-bot`.
 
 ## Configuration
