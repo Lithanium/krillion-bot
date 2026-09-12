@@ -327,6 +327,16 @@ def test_formatting(service):
     assert ratings_table([], {}) is None
 
 
+def test_black_square_shown_as_snail(service):
+    submit(service, 1, "alice", "Krillion #58 🦐\n90\n\n🫧🫧🐟🫧🫧🤡⬛")
+    results = service.storage.results_for(GUILD, 58)
+    assert results[0].tiers == "🫧🫧🐟🫧🫧🤡⬛"
+    players = {p.user_id: p for p in service.storage.players(GUILD)}
+    live = live_table(58, results, players, deltas={1: 0.0}, performances={1: None})
+    assert live.rows[0][2].text == "🫧🫧🐟🫧🫧🤡🐌"
+    assert "🫧🫧🐟🫧🫧🤡🐌" in live.text()
+
+
 def test_formatting_notes(service):
     submit(service, 1, "alice", share(58, 340))
     results = service.storage.results_for(GUILD, 58)

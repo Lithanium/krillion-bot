@@ -26,6 +26,9 @@ RESULT_RIGHT = frozenset({0, 3, 4, 5})
 RATING_HEADER = ("#", "Name", "Rating", "Games")
 RATING_RIGHT = frozenset({0, 3})
 
+DISPLAY_EMOJI = str.maketrans({"⬛": "🐌"})
+"""Substitutions applied to a result row before it is shown."""
+
 
 @dataclass(frozen=True)
 class Cell:
@@ -90,7 +93,7 @@ def result_row(
     return (
         Cell(str(place)),
         name_cell(name, rating),
-        Cell(tiers, emoji=True),
+        Cell(tiers.translate(DISPLAY_EMOJI), emoji=True),
         Cell(str(score)),
         perf_cell(performance),
         delta_cell(delta),
