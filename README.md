@@ -90,15 +90,18 @@ From your machine, with `.env` filled in:
 
 The script copies the repo to `/opt/krillion-bot` on the VM, seeds `.env` from
 your local one (only if the VM doesn't already have one), adds a 2 GB swapfile
-if the VM has none, installs Python and the dependencies into a venv, installs
-a hardened `systemd` service (`deploy/krillion-bot.service`) and starts it.
+if the VM has less than 2 GB of swap, disables the hourly `dnf-makecache`
+timer on Oracle Linux (it alone can swap-thrash a 1 GB box), installs Python
+and the dependencies into a venv, installs a hardened `systemd` service
+(`deploy/krillion-bot.service`) and starts it.
 Re-run the same command to deploy updates — the database in
 `/opt/krillion-bot/data/` is untouched. On Oracle Linux (SELinux enforcing) the
 app directory is also relabelled so systemd is allowed to read `.env` and run
 the venv — this is why it lives in `/opt` rather than your home directory.
 
 The 1 GB micro shape is slow: the first run can take 5–10 minutes while the
-package manager works (later runs skip it). If the VM stops answering ssh
+package manager works (later runs skip it and need no network beyond the
+upload). If the VM stops answering ssh
 during a first deploy it has run out of memory — reboot it from the Oracle
 console and re-run the deploy; the swapfile is created before anything heavy
 runs so it won't happen twice.

@@ -9,9 +9,11 @@ RUN_USER="$(id -un)"
 
 cd "$APP_DIR"
 
-# The 1 GB Always Free micro shape has no swap; dnf/apt metadata + pip can OOM it
-# hard enough that even ssh stops answering. Give it a swapfile first.
-if [ -z "$(swapon --show --noheadings)" ]; then
+# The 1 GB Always Free micro shape has little or no swap (Oracle Linux ships
+# ~1 GB, Ubuntu none); dnf/apt metadata + pip can OOM it hard enough that even
+# ssh stops answering. Make sure there is at least 2 GB of swap first.
+SWAP_KB=$(awk '/^SwapTotal/ {print $2}' /proc/meminfo)
+if [ "$SWAP_KB" -lt $((2 * 1024 * 1024)) ] && [ ! -f /swapfile ]; then
     echo "==> Adding 2G swapfile"
     sudo fallocate -l 2G /swapfile 2>/dev/null \
         || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
@@ -19,6 +21,14 @@ if [ -z "$(swapon --show --noheadings)" ]; then
     sudo mkswap -q /swapfile
     sudo swapon /swapfile
     grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+fi
+
+# Oracle Linux refreshes dnf metadata for every enabled repo hourly; that alone
+# can push a 1 GB box into swap-thrash. dnf still refreshes on demand when used.
+if systemctl list-unit-files dnf-makecache.timer >/dev/null 2>&1 \
+    && systemctl is-enabled --quiet dnf-makecache.timer 2>/dev/null; then
+    echo "==> Disabling dnf-makecache.timer"
+    sudo systemctl disable --now dnf-makecache.timer >/dev/null 2>&1
 fi
 
 echo "==> Installing system packages"
@@ -50,7 +60,12 @@ echo "==> Creating virtualenv + installing"
 if [ ! -x .venv/bin/python ]; then
     "$PY" -m venv .venv
 fi
-nice -n 19 .venv/bin/pip install --quiet --no-cache-dir .
+# Build in-venv rather than in pip's isolated build env, which would download
+# setuptools on every deploy. After the first run this step needs no network.
+if ! .venv/bin/python -c 'import setuptools, wheel; assert int(setuptools.__version__.split(".")[0]) >= 68' >/dev/null 2>&1; then
+    nice -n 19 .venv/bin/pip install --quiet --no-cache-dir 'setuptools>=68' wheel
+fi
+nice -n 19 .venv/bin/pip install --quiet --no-cache-dir --no-build-isolation .
 mkdir -p data
 
 if [ ! -f .env ]; then
