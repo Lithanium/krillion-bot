@@ -1,0 +1,23 @@
+[Unit]
+Description=Krillion Discord leaderboard bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=__APP_DIR__/.venv/bin/python -m krillion_bot
+Restart=always
+RestartSec=10
+# Oracle Always Free micro VMs have 1 GB RAM; keep the bot well inside that.
+MemoryMax=300M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__APP_DIR__/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

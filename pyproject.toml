@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "krillion-bot"
+version = "0.1.0"
+description = "Discord bot that tracks daily Krillion.io results, posts a daily leaderboard and keeps an Elo rating."
+requires-python = ">=3.10"
+dependencies = [
+    "discord.py>=2.4,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+krillion-bot = "krillion_bot.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["krillion_bot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:'audioop' is deprecated:DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
