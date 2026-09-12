@@ -77,12 +77,31 @@ class KrillionBot(discord.Client):
             now=message.created_at,
         )
         if outcome.status is SubmitStatus.NOT_A_RESULT:
+            if "krillion" in message.content.lower():
+                log.info(
+                    "Message %s in %s mentions Krillion but did not parse as a result",
+                    message.id,
+                    message.channel.id,
+                )
             return
         assert outcome.parsed is not None
         n = outcome.parsed.puzzle_number
+        log.info(
+            "Krillion #%d from %s in guild %s: %s (%s)",
+            n,
+            message.author.id,
+            message.guild.id,
+            outcome.status.value,
+            outcome.parsed.score,
+        )
         try:
             if outcome.status is SubmitStatus.ACCEPTED:
                 await message.add_reaction("🦐")
+                await message.reply(
+                    f"Received Krillion #{n} score from **{message.author.display_name}**: "
+                    f"{outcome.parsed.score} 🦐",
+                    mention_author=False,
+                )
             elif outcome.status is SubmitStatus.DUPLICATE:
                 assert outcome.existing is not None
                 await message.add_reaction("⚠️")

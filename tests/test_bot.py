@@ -106,7 +106,7 @@ def test_on_message_records_result(bot):
     msg = FakeMessage("Krillion #58 🦐\n340\n\n🦑🦑🦑🦑🦑🐟🫧")
     asyncio.run(bot.on_message(msg))
     assert msg.reactions == ["🦐"]
-    assert msg.replies == []
+    assert msg.replies == ["Received Krillion #58 score from **alice**: 340 🦐"]
     assert bot.service.storage.get_result(1, 58, 1).score == 340
 
 
