@@ -174,6 +174,63 @@ def test_player_becomes_established_after_five_days(provisional_service):
     assert deltas[3] == pytest.approx(-32)
 
 
+def test_invalidate_open_day_allows_resubmit(service):
+    submit(service, 1, "alice", share(58, 700))
+    assert service.invalidate(GUILD, 58, 2) is None
+    out = service.invalidate(GUILD, 58, 1)
+    assert out is not None and out.removed.score == 700 and out.replayed_days == 0
+    assert service.storage.get_result(GUILD, 58, 1) is None
+    assert submit(service, 1, "alice", share(58, 340)).status is SubmitStatus.ACCEPTED
+
+
+def test_invalidate_closed_day_replays_elo(service):
+    cal = service.calendar
+    # #58: alice 340, bob 120, mallory 700 (bogus). #59: alice 200 vs bob 250.
+    submit(service, 1, "alice", share(58, 340))
+    submit(service, 2, "bob", share(58, 120))
+    submit(service, 3, "mallory", share(58, 700))
+    service.finalize_due(cal.end(58) + timedelta(minutes=10))
+    now59 = cal.start(59) + timedelta(hours=1)
+    submit(service, 1, "alice", share(59, 200), now=now59)
+    submit(service, 2, "bob", share(59, 250), now=now59)
+    service.finalize_due(cal.end(59) + timedelta(minutes=10))
+    assert service.storage.get_player(GUILD, 3).rating == pytest.approx(1216)
+
+    out = service.invalidate(GUILD, 58, 3)
+    assert out is not None and out.replayed_days == 2
+
+    # Same ratings as if mallory had never played #58.
+    clean = KrillionService(Storage(":memory:"), PuzzleCalendar(), provisional_games=0)
+    submit(clean, 1, "alice", share(58, 340))
+    submit(clean, 2, "bob", share(58, 120))
+    clean.finalize_due(cal.end(58) + timedelta(minutes=10))
+    submit(clean, 1, "alice", share(59, 200), now=now59)
+    submit(clean, 2, "bob", share(59, 250), now=now59)
+    clean.finalize_due(cal.end(59) + timedelta(minutes=10))
+    for uid in (1, 2):
+        assert service.storage.get_player(GUILD, uid).rating == pytest.approx(
+            clean.storage.get_player(GUILD, uid).rating
+        )
+    assert service.storage.get_player(GUILD, 3).rating == 1200
+    assert service.storage.games_played(GUILD) == {1: 2, 2: 2}
+    assert [e.user_id for e in service.storage.history_for(GUILD, 58)] == [1, 2]
+    assert service.storage.is_finalized(GUILD, 58) and service.storage.is_finalized(GUILD, 59)
+    # Nothing is left dangling for the scheduler to re-close.
+    assert service.finalize_due(cal.end(59) + timedelta(days=1)) == []
+
+
+def test_invalidate_only_result_leaves_day_empty(service):
+    submit(service, 1, "alice", share(58, 700))
+    service.finalize_due(RESET_59 + timedelta(minutes=10))
+    out = service.invalidate(GUILD, 58, 1)
+    assert out is not None and out.replayed_days == 0
+    assert not service.storage.is_finalized(GUILD, 58)
+    assert service.storage.history_for(GUILD, 58) == []
+    assert submit(
+        service, 1, "alice", share(58, 340), now=RESET_59 + timedelta(hours=1)
+    ).status is (SubmitStatus.TOO_LATE)
+
+
 def test_stats_and_games(service):
     submit(service, 1, "alice", share(58, 340))
     submit(service, 2, "bob", share(58, 100))

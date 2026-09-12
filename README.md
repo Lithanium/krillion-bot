@@ -43,6 +43,12 @@ SQLite on disk, ~60 MB RAM, no other services.
   - `/stats [member]` – rating, games, wins, best and average score
   - `/puzzle` – which puzzle is live and when it resets (shown in each user's
     local time)
+  - `/invalidate <member> [puzzle] [reason]` – **admins only**: remove a
+    misreported score. If the day is still open the player can repost; if it
+    was already closed, every closed day's Elo is replayed from the remaining
+    results so ratings stay consistent.
+- **Admins** are the Discord user IDs in `ADMIN_USER_IDS` (default:
+  `750888871696269402`).
 
 ## 1. Create the Discord application
 
@@ -112,6 +118,7 @@ All settings live in `.env` (see `.env.example`):
 | `ELO_K` | `32` | Elo K-factor (max daily swing) |
 | `ELO_PROVISIONAL_K` | `64` | K-factor during a player's provisional period |
 | `ELO_PROVISIONAL_GAMES` | `5` | Rated days before a player is established |
+| `ADMIN_USER_IDS` | `750888871696269402` | Comma-separated user IDs allowed to run admin commands |
 | `KRILLION_TIMEZONE` | `America/New_York` | Timezone the game resets in |
 | `KRILLION_EPOCH_DATE` | `2026-07-16` | Date of Krillion #1 |
 

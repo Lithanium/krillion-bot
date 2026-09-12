@@ -6,6 +6,8 @@ from datetime import date
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+DEFAULT_ADMIN_USER_IDS = frozenset({750888871696269402})
+
 
 def load_dotenv(path: str | os.PathLike[str] = ".env") -> None:
     """Minimal .env loader: KEY=VALUE lines, '#' comments, no interpolation.
@@ -32,6 +34,12 @@ def _int_or_none(value: str | None) -> int | None:
     return int(value)
 
 
+def _id_set(value: str | None) -> frozenset[int]:
+    if value is None:
+        return DEFAULT_ADMIN_USER_IDS
+    return frozenset(int(part) for part in value.replace(";", ",").split(",") if part.strip())
+
+
 @dataclass(frozen=True)
 class Config:
     token: str
@@ -45,6 +53,7 @@ class Config:
     puzzle_tz: ZoneInfo
     epoch_date: date
     log_level: str
+    admin_user_ids: frozenset[int] = DEFAULT_ADMIN_USER_IDS
 
     @classmethod
     def from_env(cls) -> Config:
@@ -63,4 +72,5 @@ class Config:
             puzzle_tz=ZoneInfo(os.environ.get("KRILLION_TIMEZONE", "America/New_York")),
             epoch_date=date.fromisoformat(os.environ.get("KRILLION_EPOCH_DATE", "2026-07-16")),
             log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+            admin_user_ids=_id_set(os.environ.get("ADMIN_USER_IDS")),
         )

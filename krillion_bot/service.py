@@ -48,6 +48,13 @@ class FinalizedDay:
     """Players still provisional after this day."""
 
 
+@dataclass(frozen=True)
+class Invalidation:
+    removed: Result
+    replayed_days: int
+    """Closed days whose Elo was recomputed (0 if the puzzle was still open)."""
+
+
 class KrillionService:
     def __init__(
         self,
@@ -170,6 +177,27 @@ class KrillionService:
         }
         provisional = frozenset(uid for uid in scores if self.is_provisional(games.get(uid, 0) + 1))
         return FinalizedDay(guild_id, puzzle_number, channel_id, entries, updated, provisional)
+
+    # -- admin -----------------------------------------------------------
+
+    def invalidate(self, guild_id: int, puzzle_number: int, user_id: int) -> Invalidation | None:
+        """Drop a user's result. If that day was already closed, replay Elo from scratch."""
+        removed = self.storage.remove_result(guild_id, puzzle_number, user_id)
+        if removed is None:
+            return None
+        if not self.storage.is_finalized(guild_id, puzzle_number):
+            return Invalidation(removed, 0)
+        return Invalidation(removed, self.replay(guild_id))
+
+    def replay(self, guild_id: int) -> int:
+        """Recompute every closed day's Elo from the stored results, in order.
+
+        Returns how many days were re-finalized. A day left with no results stays open
+        (it no longer appears in history), but is still too old to accept submissions.
+        """
+        days = self.storage.finalized_puzzles(guild_id)
+        self.storage.reset_ratings(guild_id)
+        return sum(self.finalize(guild_id, n, at) is not None for n, at in days)
 
     def finalize_due(self, now: datetime) -> list[FinalizedDay]:
         done: list[FinalizedDay] = []

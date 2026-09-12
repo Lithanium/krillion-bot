@@ -54,6 +54,9 @@ class KrillionBot(discord.Client):
             self._scheduler.cancel()
         await super().close()
 
+    def is_admin(self, user: discord.abc.User) -> bool:
+        return user.id in self.config.admin_user_ids
+
     # -- results ingestion ----------------------------------------------
 
     async def on_message(self, message: discord.Message) -> None:
@@ -212,6 +215,53 @@ class KrillionBot(discord.Client):
                 f"Elo {rating} · {s.games} played · {s.wins} wins\n"
                 f"Best {best} · Average {avg}"
             )
+
+        @tree.command(name="invalidate", description="[Admin] Remove a misreported score.")
+        @app_commands.describe(
+            member="Whose score to remove",
+            puzzle="Puzzle number (default: today's)",
+            reason="Shown in the confirmation message",
+        )
+        async def invalidate(
+            interaction: discord.Interaction,
+            member: discord.Member,
+            puzzle: int | None = None,
+            reason: str | None = None,
+        ) -> None:
+            if interaction.guild_id is None:
+                await interaction.response.send_message("Use this in a server.", ephemeral=True)
+                return
+            if not self.is_admin(interaction.user):
+                await interaction.response.send_message(
+                    "Only bot admins can invalidate scores.", ephemeral=True
+                )
+                return
+            n = puzzle if puzzle is not None else calendar.current(_now())
+            outcome = service.invalidate(interaction.guild_id, n, member.id)
+            if outcome is None:
+                await interaction.response.send_message(
+                    f"**{member.display_name}** has no Krillion #{n} result to remove.",
+                    ephemeral=True,
+                )
+                return
+            text = (
+                f"🗑️ **{member.display_name}**'s Krillion #{n} score ({outcome.removed.score}) "
+                f"was invalidated by {interaction.user.mention}."
+            )
+            if reason:
+                text += f"\nReason: {reason}"
+            if outcome.replayed_days:
+                text += f"\nElo recalculated across {outcome.replayed_days} closed day(s)."
+            else:
+                text += " They can post a corrected result."
+            log.info(
+                "Admin %s invalidated puzzle #%d for user %s in guild %s",
+                interaction.user.id,
+                n,
+                member.id,
+                interaction.guild_id,
+            )
+            await interaction.response.send_message(text)
 
         @tree.command(name="puzzle", description="Which Krillion puzzle is live and when it resets")
         async def puzzle(interaction: discord.Interaction) -> None:

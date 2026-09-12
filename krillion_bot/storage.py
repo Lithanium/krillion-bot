@@ -190,6 +190,16 @@ class Storage:
         ).fetchone()
         return self._result(row) if row else None
 
+    def remove_result(self, guild_id: int, puzzle_number: int, user_id: int) -> Result | None:
+        """Delete a user's result for a puzzle, returning it (or ``None`` if there was none)."""
+        existing = self.get_result(guild_id, puzzle_number, user_id)
+        if existing is not None:
+            self._conn.execute(
+                "DELETE FROM results WHERE guild_id = ? AND puzzle_number = ? AND user_id = ?",
+                (guild_id, puzzle_number, user_id),
+            )
+        return existing
+
     def results_for(self, guild_id: int, puzzle_number: int) -> list[Result]:
         rows = self._conn.execute(
             """
@@ -265,6 +275,25 @@ class Storage:
                 "INSERT INTO finalized_days (guild_id, puzzle_number, finalized_at) "
                 "VALUES (?, ?, ?)",
                 (guild_id, puzzle_number, _iso(finalized_at)),
+            )
+
+    def finalized_puzzles(self, guild_id: int) -> list[tuple[int, datetime]]:
+        """``(puzzle_number, finalized_at)`` for every closed day in the guild, oldest first."""
+        rows = self._conn.execute(
+            "SELECT puzzle_number, finalized_at FROM finalized_days WHERE guild_id = ? "
+            "ORDER BY puzzle_number",
+            (guild_id,),
+        ).fetchall()
+        return [(r["puzzle_number"], _from_iso(r["finalized_at"])) for r in rows]
+
+    def reset_ratings(self, guild_id: int) -> None:
+        """Wipe rating history and finalizations; everyone goes back to the starting rating."""
+        with self._conn:
+            self._conn.execute("BEGIN")
+            self._conn.execute("DELETE FROM rating_history WHERE guild_id = ?", (guild_id,))
+            self._conn.execute("DELETE FROM finalized_days WHERE guild_id = ?", (guild_id,))
+            self._conn.execute(
+                "UPDATE players SET rating = ? WHERE guild_id = ?", (STARTING_RATING, guild_id)
             )
 
     def history_for(self, guild_id: int, puzzle_number: int) -> list[RatingEntry]:

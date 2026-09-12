@@ -32,7 +32,16 @@ def test_config_from_env(monkeypatch):
     assert cfg.late_grace_minutes == 5
     assert cfg.elo_k == 40
     assert (cfg.provisional_k, cfg.provisional_games) == (80, 3)
+    assert cfg.admin_user_ids == {750888871696269402}
     assert str(cfg.puzzle_tz) == "America/New_York"
+
+
+def test_admin_ids_from_env(monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "abc")
+    monkeypatch.setenv("ADMIN_USER_IDS", "1, 22,,333")
+    assert Config.from_env().admin_user_ids == {1, 22, 333}
+    monkeypatch.setenv("ADMIN_USER_IDS", "")
+    assert Config.from_env().admin_user_ids == frozenset()
 
 
 def test_config_requires_token(monkeypatch):
