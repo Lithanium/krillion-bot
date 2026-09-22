@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import discord
 from discord import app_commands
 
+from . import commands, commands_admin
+from .analytics import WeekRecap, build_week_recap
 from .config import Config
-from .formatting import Table, final_table, live_table, ratings_table
+from .discord_util import board_message, utcnow
+from .formatting import final_table
+from .models import Result
+from .parser import ParsedResult, parse_result
 from .puzzle import PuzzleCalendar
-from .rating import rank_for_rating
-from .render import render_table
 from .service import FinalizedDay, KrillionService, SubmitStatus
 from .storage import Storage
+from .views import week_table, week_text
 
 log = logging.getLogger(__name__)
 
@@ -23,26 +26,7 @@ _POLL_CAP = timedelta(minutes=15)
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def board_message(table: Table, filename: str) -> dict[str, Any]:
-    """kwargs for ``send``: the table as a PNG attachment, or as text if that fails.
-
-    Notes carrying a Discord timestamp can't go in the image, so they stay as text.
-    """
-    try:
-        png = render_table(table)
-    except Exception:
-        log.exception("Rendering leaderboard image failed; sending text")
-        png = None
-    if png is None:
-        return {"content": table.text()}
-    timed = [n for n in table.notes if "<t:" in n]
-    return {
-        "content": "\n".join(timed) or None,
-        "file": discord.File(io.BytesIO(png), filename=filename),
-    }
+    return utcnow()
 
 
 class KrillionBot(discord.Client):
@@ -54,8 +38,13 @@ class KrillionBot(discord.Client):
         self.config = config
         self.service = service
         self.tree = app_commands.CommandTree(self)
-        self._register_commands()
+        group = commands.register(self)
+        commands_admin.register(self, group)
         self._scheduler: asyncio.Task[None] | None = None
+
+    @staticmethod
+    def now() -> datetime:
+        return _now()
 
     # -- lifecycle -------------------------------------------------------
 
@@ -80,18 +69,45 @@ class KrillionBot(discord.Client):
             self._scheduler.cancel()
         await super().close()
 
-    def is_admin(self, user: discord.abc.User) -> bool:
-        return user.id in self.config.admin_user_ids
+    def admin_ids(self, guild_id: int) -> set[int]:
+        return set(self.config.admin_user_ids) | self.service.storage.admins(guild_id)
+
+    def is_admin(self, user: discord.abc.User, guild_id: int) -> bool:
+        if user.id in self.admin_ids(guild_id):
+            return True
+        return isinstance(user, discord.Member) and user.guild_permissions.manage_guild
+
+    def channel_setting(self, guild_id: int, key: str) -> int | None:
+        """Per-server channel override, else the env default (``None`` = unset)."""
+        stored = self.service.storage.get_setting(guild_id, key)
+        if stored is not None:
+            return int(stored)
+        if key == "results_channel":
+            return self.config.results_channel_id
+        if key == "leaderboard_channel":
+            return self.config.leaderboard_channel_id
+        return None
+
+    async def _messageable(self, channel_id: int) -> discord.abc.Messageable | None:
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(channel_id)
+            except discord.HTTPException:
+                log.error("Cannot find channel %s", channel_id)
+                return None
+        if not isinstance(channel, discord.abc.Messageable):
+            log.error("Channel %s is not messageable", channel_id)
+            return None
+        return channel
 
     # -- results ingestion ----------------------------------------------
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None:
             return
-        if (
-            self.config.results_channel_id is not None
-            and message.channel.id != self.config.results_channel_id
-        ):
+        wanted = self.channel_setting(message.guild.id, "results_channel")
+        if wanted is not None and message.channel.id != wanted:
             return
         outcome = self.service.submit(
             guild_id=message.guild.id,
@@ -149,6 +165,8 @@ class KrillionBot(discord.Client):
                     f"Krillion #{n} isn't out yet — today's puzzle is #{outcome.current_puzzle}.",
                     mention_author=False,
                 )
+            elif outcome.status is SubmitStatus.BANNED:
+                await message.add_reaction("🚫")
         except discord.HTTPException:
             log.exception("Failed to respond to submission in %s", message.channel.id)
 
@@ -167,16 +185,9 @@ class KrillionBot(discord.Client):
             await asyncio.sleep(max(1.0, (wake - now).total_seconds() + 1))
 
     async def _announce(self, day: FinalizedDay) -> None:
-        channel_id = self.config.leaderboard_channel_id or day.channel_id
-        channel = self.get_channel(channel_id)
+        channel_id = self.channel_setting(day.guild_id, "leaderboard_channel") or day.channel_id
+        channel = await self._messageable(channel_id)
         if channel is None:
-            try:
-                channel = await self.fetch_channel(channel_id)
-            except discord.HTTPException:
-                log.error("Cannot find channel %s for leaderboard", channel_id)
-                return
-        if not isinstance(channel, discord.abc.Messageable):
-            log.error("Channel %s is not messageable", channel_id)
             return
         tiers = {
             r.user_id: r.tiers
@@ -192,153 +203,82 @@ class KrillionBot(discord.Client):
         )
         await channel.send(**board_message(board, f"krillion-{day.puzzle_number}.png"))
         log.info("Posted Krillion #%d results for guild %s", day.puzzle_number, day.guild_id)
+        closed = self.service.calendar.date_for(day.puzzle_number)
+        if closed.weekday() == 6:
+            await self._announce_week(day.guild_id, closed)
 
-    # -- slash commands --------------------------------------------------
+    # -- weekly recap ----------------------------------------------------
 
-    def _register_commands(self) -> None:
-        tree = self.tree
-        service = self.service
+    def week_recap(self, guild_id: int, anchor: date, today: date) -> WeekRecap:
         storage = self.service.storage
-        calendar: PuzzleCalendar = self.service.calendar
-
-        @tree.command(name="leaderboard", description="Today's Krillion scores (or a past puzzle).")
-        @app_commands.describe(puzzle="Puzzle number, e.g. 58 (default: today's)")
-        async def leaderboard(interaction: discord.Interaction, puzzle: int | None = None) -> None:
-            if interaction.guild_id is None:
-                await interaction.response.send_message("Use this in a server.", ephemeral=True)
-                return
-            now = _now()
-            n = puzzle if puzzle is not None else calendar.current(now)
-            guild_id = interaction.guild_id
-            if storage.is_finalized(guild_id, n):
-                entries = storage.history_for(guild_id, n)
-                ids = [e.user_id for e in entries]
-                players = {p.user_id: p for p in storage.players(guild_id, ids)}
-                tiers = {r.user_id: r.tiers for r in storage.results_for(guild_id, n)}
-                board = final_table(n, calendar.date_for(n), entries, players, tiers)
-                await interaction.response.send_message(**board_message(board, f"krillion-{n}.png"))
-                return
-            results = storage.results_for(guild_id, n)
-            if not results:
-                await interaction.response.send_message(f"**Krillion #{n}** — no results yet. 🫧")
-                return
-            ids = [r.user_id for r in results]
-            players = {p.user_id: p for p in storage.players(guild_id, ids)}
-            reset_unix = (
-                int(service.next_finalize_at(now).timestamp())
-                if n == calendar.current(now)
-                else None
-            )
-            outcome = service.rate_day(guild_id, n, results)
-            board = live_table(
-                n,
-                results,
-                players,
-                deltas=outcome.deltas,
-                performances=outcome.performances,
-                reset_unix=reset_unix,
-            )
-            await interaction.response.send_message(
-                **board_message(board, f"krillion-{n}-live.png")
-            )
-
-        @tree.command(name="elo", description="Krillion rating rankings for this server.")
-        async def elo(interaction: discord.Interaction) -> None:
-            if interaction.guild_id is None:
-                await interaction.response.send_message("Use this in a server.", ephemeral=True)
-                return
-            players = storage.players(interaction.guild_id)
-            games = storage.games_played(interaction.guild_id)
-            table = ratings_table(players, games)
-            if table is None:
-                await interaction.response.send_message(
-                    "No rated divers yet — finish a day first. 🫧"
-                )
-                return
-            await interaction.response.send_message(**board_message(table, "krillion-ratings.png"))
-
-        @tree.command(name="stats", description="Krillion stats for you or another diver.")
-        @app_commands.describe(member="Whose stats (default: you)")
-        async def stats(
-            interaction: discord.Interaction, member: discord.Member | None = None
-        ) -> None:
-            if interaction.guild_id is None:
-                await interaction.response.send_message("Use this in a server.", ephemeral=True)
-                return
-            target = member or interaction.user
-            player = storage.get_player(interaction.guild_id, target.id)
-            if player is None:
-                await interaction.response.send_message(
-                    f"**{target.display_name}** hasn't shared a Krillion result yet. 🫧",
-                    ephemeral=True,
-                )
-                return
-            s = storage.stats_for(interaction.guild_id, target.id)
-            avg = f"{s.average_score:.0f}" if s.average_score is not None else "—"
-            best = str(s.best_score) if s.best_score is not None else "—"
-            rank = rank_for_rating(round(player.rating))
-            await interaction.response.send_message(
-                f"**{player.display_name}** 🦐\n"
-                f"Rating **{round(player.rating)}** ({rank.title}) · {s.games} played · "
-                f"{s.wins} wins\n"
-                f"Best {best} · Average {avg}"
-            )
-
-        @tree.command(name="invalidate", description="[Admin] Remove a misreported score.")
-        @app_commands.describe(
-            member="Whose score to remove",
-            puzzle="Puzzle number (default: today's)",
-            reason="Shown in the confirmation message",
+        calendar = self.service.calendar
+        low = calendar.number_for_date(anchor - timedelta(days=anchor.weekday() + 7))
+        high = calendar.number_for_date(anchor + timedelta(days=6 - anchor.weekday()))
+        return build_week_recap(
+            storage.results_between(guild_id, low, high),
+            storage.history_between(guild_id, low, high),
+            calendar,
+            anchor,
+            today,
         )
-        async def invalidate(
-            interaction: discord.Interaction,
-            member: discord.Member,
-            puzzle: int | None = None,
-            reason: str | None = None,
-        ) -> None:
-            if interaction.guild_id is None:
-                await interaction.response.send_message("Use this in a server.", ephemeral=True)
-                return
-            if not self.is_admin(interaction.user):
-                await interaction.response.send_message(
-                    "Only bot admins can invalidate scores.", ephemeral=True
-                )
-                return
-            n = puzzle if puzzle is not None else calendar.current(_now())
-            outcome = service.invalidate(interaction.guild_id, n, member.id)
-            if outcome is None:
-                await interaction.response.send_message(
-                    f"**{member.display_name}** has no Krillion #{n} result to remove.",
-                    ephemeral=True,
-                )
-                return
-            text = (
-                f"🗑️ **{member.display_name}**'s Krillion #{n} score ({outcome.removed.score}) "
-                f"was invalidated by {interaction.user.mention}."
-            )
-            if reason:
-                text += f"\nReason: {reason}"
-            if outcome.replayed_days:
-                text += f"\nRatings recalculated across {outcome.replayed_days} closed day(s)."
-            else:
-                text += " They can post a corrected result."
-            log.info(
-                "Admin %s invalidated puzzle #%d for user %s in guild %s",
-                interaction.user.id,
-                n,
-                member.id,
-                interaction.guild_id,
-            )
-            await interaction.response.send_message(text)
 
-        @tree.command(name="puzzle", description="Which Krillion puzzle is live and when it resets")
-        async def puzzle(interaction: discord.Interaction) -> None:
-            now = _now()
-            n = calendar.current(now)
-            reset = int(calendar.next_reset(now).timestamp())
-            await interaction.response.send_message(
-                f"Krillion **#{n}** is live. Resets <t:{reset}:t> (<t:{reset}:R>)."
+    def week_board(self, recap: WeekRecap, names: dict[int, str]) -> dict[str, Any]:
+        """Attachment kwargs for the standings table (empty if there's nothing to show)."""
+        if not recap.standings:
+            return {}
+        message = board_message(week_table(recap, names), f"krillion-week-{recap.start}.png")
+        return {"file": message["file"]} if "file" in message else {}
+
+    async def _announce_week(self, guild_id: int, sunday: date) -> None:
+        channel_id = self.channel_setting(guild_id, "weekly_channel")
+        if channel_id is None:
+            return
+        channel = await self._messageable(channel_id)
+        if channel is None:
+            return
+        recap = self.week_recap(guild_id, sunday, sunday)
+        if recap.results == 0:
+            return
+        names = {p.user_id: p.display_name for p in self.service.storage.players(guild_id)}
+        await channel.send(week_text(recap, names), **self.week_board(recap, names))
+        log.info("Posted weekly recap for guild %s (week of %s)", guild_id, recap.start)
+
+    # -- message re-reading ----------------------------------------------
+
+    async def refetch_results(
+        self, guild_id: int, puzzle_number: int
+    ) -> list[tuple[ParsedResult | None, Result]]:
+        """Re-parse the original share message behind each stored result."""
+        out: list[tuple[ParsedResult | None, Result]] = []
+        for r in self.service.storage.results_for(guild_id, puzzle_number):
+            if r.message_id is None:
+                continue
+            channel = await self._messageable(r.channel_id)
+            if channel is None:
+                continue
+            try:
+                message = await channel.fetch_message(r.message_id)
+            except discord.HTTPException:
+                log.warning("Cannot fetch message %s for reparse", r.message_id)
+                continue
+            out.append((parse_result(message.content), r))
+        return out
+
+    async def import_channel(self, guild_id: int, channel: discord.TextChannel, limit: int) -> int:
+        added = 0
+        async for message in channel.history(limit=limit, oldest_first=False):
+            if message.author.bot:
+                continue
+            added += self.service.import_result(
+                guild_id=guild_id,
+                user_id=message.author.id,
+                display_name=message.author.display_name,
+                text=message.content,
+                channel_id=channel.id,
+                message_id=message.id,
+                created_at=message.created_at,
             )
+        return added
 
 
 def build(config: Config) -> KrillionBot:

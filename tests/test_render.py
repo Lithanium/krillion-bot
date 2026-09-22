@@ -46,7 +46,7 @@ def test_leaderboard_command_falls_back_to_text(bot, monkeypatch):
     monkeypatch.setattr("krillion_bot.bot._now", lambda: NOW)
     asyncio.run(bot.on_message(FakeMessage("Krillion #58 🦐\n340\n\n🦑🦑🦑🦑🦑🐟🫧")))
     interaction = FakeInteraction(user_id=1)
-    run_command(bot, "leaderboard", interaction, None)
+    run_command(bot, "krillion leaderboard", interaction, None)
     (text, _ephemeral), *_ = interaction.sent
     assert "Krillion #58 — live" in text
     assert "` 1.`  **alice (1200 E)**  🦑🦑🦑🦑🦑🐟🫧  340  +0" in text
@@ -64,7 +64,7 @@ def test_leaderboard_command_sends_image(bot, monkeypatch):
 
     interaction = FakeInteraction(user_id=1)
     interaction.response.send_message = capture
-    run_command(bot, "leaderboard", interaction, None)
+    run_command(bot, "krillion leaderboard", interaction, None)
     assert sent["file"].filename == "krillion-58-live.png"
     assert sent["content"].startswith("_Projected rating changes; closes <t:")
 
@@ -72,5 +72,5 @@ def test_leaderboard_command_sends_image(bot, monkeypatch):
 def test_leaderboard_command_empty_day(bot, monkeypatch):
     monkeypatch.setattr("krillion_bot.bot._now", lambda: NOW)
     interaction = FakeInteraction(user_id=1)
-    run_command(bot, "leaderboard", interaction, None)
+    run_command(bot, "krillion leaderboard", interaction, None)
     assert interaction.sent == [("**Krillion #58** — no results yet. 🫧", False)]
