@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any
 
 import discord
 from discord import app_commands
@@ -11,14 +10,14 @@ from discord import app_commands
 from . import commands, commands_admin
 from .analytics import WeekRecap, build_week_recap
 from .config import Config
-from .discord_util import board_message, utcnow
+from .discord_util import board_message, png_file, utcnow
 from .formatting import final_table
 from .models import Result
 from .parser import ParsedResult, parse_result
+from .plot_week import week_plot
 from .puzzle import PuzzleCalendar
 from .service import FinalizedDay, KrillionService, SubmitStatus
 from .storage import Storage
-from .views import week_table, week_text
 
 log = logging.getLogger(__name__)
 
@@ -222,12 +221,15 @@ class KrillionBot(discord.Client):
             today,
         )
 
-    def week_board(self, recap: WeekRecap, names: dict[int, str]) -> dict[str, Any]:
-        """Attachment kwargs for the standings table (empty if there's nothing to show)."""
-        if not recap.standings:
-            return {}
-        message = board_message(week_table(recap, names), f"krillion-week-{recap.start}.png")
-        return {"file": message["file"]} if "file" in message else {}
+    async def week_image(
+        self, guild_id: int, recap: WeekRecap, viewer: int | None = None
+    ) -> discord.File:
+        """The recap dashboard, names coloured by each diver's current rank."""
+        players = self.service.storage.players(guild_id)
+        names = {p.user_id: p.display_name for p in players}
+        ratings = {p.user_id: p.rating for p in players}
+        png = await asyncio.to_thread(week_plot, recap, names, ratings, viewer=viewer)
+        return png_file(png, f"krillion-week-{recap.start}.png")
 
     async def _announce_week(self, guild_id: int, sunday: date) -> None:
         channel_id = self.channel_setting(guild_id, "weekly_channel")
@@ -239,8 +241,7 @@ class KrillionBot(discord.Client):
         recap = self.week_recap(guild_id, sunday, sunday)
         if recap.results == 0:
             return
-        names = {p.user_id: p.display_name for p in self.service.storage.players(guild_id)}
-        await channel.send(week_text(recap, names), **self.week_board(recap, names))
+        await channel.send(file=await self.week_image(guild_id, recap))
         log.info("Posted weekly recap for guild %s (week of %s)", guild_id, recap.start)
 
     # -- message re-reading ----------------------------------------------

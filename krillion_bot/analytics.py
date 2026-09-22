@@ -12,7 +12,7 @@ from __future__ import annotations
 import statistics
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from .models import RatingEntry, Result
@@ -352,7 +352,6 @@ class WeekRecap:
     """Rating changes over the week, biggest gain first."""
     players: int
     results: int
-    notes: list[str] = field(default_factory=list)
 
 
 def _averages(results: Iterable[Result]) -> dict[int, tuple[float, int]]:

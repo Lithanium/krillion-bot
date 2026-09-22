@@ -69,9 +69,9 @@ def test_sunday_close_posts_weekly_recap(bot, monkeypatch):
 
     bot.service.storage.set_setting(1, "weekly_channel", "10")
     asyncio.run(bot._announce_week(1, bot.service.calendar.date_for(60)))
-    text, _ = channel.sent[-1]
-    assert "7 Sep" in text or "week" in text.lower()
-    assert "alice" in text and "bob" in text
+    content, kwargs = channel.sent[-1]
+    assert content is None
+    assert kwargs["file"].filename == "krillion-week-2026-09-07.png"
 
 
 def test_weekly_recap_skips_empty_week(bot, monkeypatch):
