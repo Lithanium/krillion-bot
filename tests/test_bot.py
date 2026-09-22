@@ -83,6 +83,7 @@ def make_config(tmp_path: Path, **overrides) -> Config:
 def test_build_registers_commands_and_creates_db(tmp_path):
     b = build(make_config(tmp_path))
     assert {c.name for c in b.tree.get_commands()} == {
+        "krillion",
         "leaderboard",
         "elo",
         "stats",
@@ -128,7 +129,7 @@ def test_invalidate_requires_admin(bot):
     alice = SimpleNamespace(id=1, display_name="alice")
     outsider = FakeInteraction(user_id=999)
     run_command(bot, "invalidate", outsider, alice, 58)
-    assert outsider.sent == [("Only bot admins can invalidate scores.", True)]
+    assert outsider.sent == [("Only Krillion admins can do that.", True)]
     assert bot.service.storage.get_result(1, 58, 1).score == 700
 
 
