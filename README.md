@@ -34,6 +34,9 @@ SQLite on disk, ~60 MB RAM, no other services.
   DejaVu Sans and Noto Color Emoji (`fonts/NotoColorEmoji.ttf`, fetched by
   the deploy script); if either is missing the same board is sent as text.
   Rendering takes well under 100 ms and a few MB of RAM.
+- **Dashboards**: `stats`, `week`, `rating` and `performance` reply with
+  matplotlib images in the NeoTLE style (player names coloured by rating
+  rank); everything else replies with NeoTLE-style embeds and paged lists.
 - **Rating**: the Codeforces-style contest rating used by the Queens bot in
   [mklol/tle-gf](https://github.com/mklol/tle-gf). Everyone starts at
   **1200**. Each day is one contest: submitters are ranked by score (ties
@@ -218,10 +221,12 @@ krillion_bot/
   service.py        submissions, grace period, closing a day, admin edits, replay
   analytics.py      streaks, skips, winners, head-to-head, stats, weekly recap
   formatting.py     leaderboard rows/text
-  views.py          text and tables for the stats/streak/vs/week commands
+  views.py          embeds and pages for the streak/skips/top/vs/history/rating commands
   render.py         leaderboard PNG
-  charts.py         rating / performance graph PNG
-  discord_util.py   shared reply / attachment helpers
+  charts.py         matplotlib theme, rank colours, rating / performance graph
+  plot_stats.py     /krillion stats dashboard
+  plot_week.py      weekly recap dashboard
+  discord_util.py   embeds, pagination, attachments
   commands.py       /krillion public commands
   commands_admin.py /krillion admin and config subgroups
   bot.py            Discord glue (events, scheduler, weekly recap, imports)
