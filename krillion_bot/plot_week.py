@@ -135,9 +135,9 @@ def _draw_standouts(fig: Figure, recap: WeekRecap, names: Names, ratings: Rating
 
 
 def _draw_moves(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
-    ax = panel(fig, (0.04, 0.08, 0.44, 0.225), "RATING MOVERS  ·  THIS WEEK", DARK)
+    ax = panel(fig, (0.04, 0.08, 0.2833, 0.225), "DAILY RATING  ·  THIS WEEK", DARK)
     if not recap.moves:
-        empty_note(ax, "No rating movement this week.")
+        empty_note(ax, "No daily rating movement this week.")
         return
     gains = [m for m in recap.moves if m.delta >= 0][:3]
     losses = [m for m in recap.moves if m.delta < 0][-3:]
@@ -149,7 +149,7 @@ def _draw_moves(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -
         ax.text(0.03, y, "▲" if gaining else "▼", va="center", color=color, fontsize=7)
         draw_names(ax, 0.09, y, [_label(names, ratings, m.user_id)], fontsize=9)
         ax.text(
-            0.83,
+            0.76,
             y,
             f"{round(m.after)}",
             va="center",
@@ -171,7 +171,7 @@ def _draw_moves(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -
 
 
 def _draw_scores(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
-    ax = panel(fig, (0.355, 0.08, 0.2833, 0.225), "TOTAL SCORE  ·  THIS WEEK", BLUE)
+    ax = panel(fig, (0.3583, 0.08, 0.2833, 0.225), "TOTAL SCORE  ·  THIS WEEK", BLUE)
     top = sorted(recap.standings, key=lambda s: (-s.total, -s.average, s.user_id))[:6]
     if not top:
         empty_note(ax, "No results this week.")
@@ -179,7 +179,8 @@ def _draw_scores(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) 
     step = 1 / 6
     for i, s in enumerate(top):
         y = 1 - step * (i + 0.5)
-        draw_names(ax, 0.03, y, [_label(names, ratings, s.user_id, 14)], fontsize=8)
+        ax.text(0.03, y, f"#{i + 1}", va="center", color=BLUE, fontsize=8, weight="bold")
+        draw_names(ax, 0.13, y, [_label(names, ratings, s.user_id, 14)], fontsize=8)
         ax.text(
             0.98,
             y,
@@ -193,7 +194,7 @@ def _draw_scores(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) 
 
 
 def _draw_averages(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
-    ax = panel(fig, (0.67, 0.08, 0.2833, 0.225), "BEST AVERAGE  ·  FULL WEEK ONLY", AMBER)
+    ax = panel(fig, (0.6767, 0.08, 0.2833, 0.225), "BEST AVERAGE  ·  FULL WEEK ONLY", AMBER)
     elapsed = sum(day.day <= recap.end for day in recap.days)
     top = [s for s in recap.standings if s.days == elapsed]
     top.sort(key=lambda s: (-s.average, s.user_id))
@@ -202,7 +203,8 @@ def _draw_averages(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings
         return
     for i, s in enumerate(top[:6]):
         y = 1 - (i + 0.5) / 6
-        draw_names(ax, 0.03, y, [_label(names, ratings, s.user_id, 14)], fontsize=8)
+        ax.text(0.03, y, f"#{i + 1}", va="center", color=AMBER, fontsize=8, weight="bold")
+        draw_names(ax, 0.13, y, [_label(names, ratings, s.user_id, 14)], fontsize=8)
         ax.text(
             0.98,
             y,
@@ -219,10 +221,12 @@ def _personal(recap: WeekRecap, viewer: int | None) -> str:
     mine = next((s for s in recap.standings if s.user_id == viewer), None)
     if mine is None:
         return "YOU HAVE NO RESULTS THIS WEEK" if viewer is not None else ""
-    rank = recap.standings.index(mine) + 1
+    wins_board = sorted(recap.standings, key=lambda s: (-s.total_wins, -s.solo_wins, s.user_id))
+    rank = wins_board.index(mine) + 1
     parts = [f"{mine.days} PLAYED", f"{mine.perfects} PERFECT"]
     if mine.solo_wins or mine.tied_wins:
         parts.append(f"{mine.solo_wins} SOLO WIN(S) · {mine.tied_wins} TIED")
+    parts.append(f"{mine.best} BEST")
     parts.append(f"#{rank} ON THE BOARD")
     return "YOUR WEEK  ·  " + "  ·  ".join(parts)
 
@@ -255,7 +259,7 @@ def week_plot(
         ha="right",
     )  # fmt: skip
 
-    played = [d for d in recap.days if d.winners is not None]
+    played = [d for d in recap.days if d.participants > 0]
     kpi_strip(
         fig,
         [

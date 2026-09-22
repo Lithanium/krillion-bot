@@ -74,6 +74,7 @@ def _strip(fig, scores: dict[date, int], week: Sequence[date], today: date) -> N
 
 def _trend(fig, rows: Sequence[Result], calendar: PuzzleCalendar) -> None:
     ax = _panel(fig, (0.04, 0.09, 0.575, 0.375))
+    ax.tick_params(colors=_MUTED, labelsize=8, length=0)
     recent = rows[-35:]
     dates = [calendar.date_for(r.puzzle_number) for r in recent]
     perfect = [(d, r.score) for d, r in zip(dates, recent, strict=True) if r.score == MAX_DAY_SCORE]
@@ -139,6 +140,7 @@ def _weekday_dna(fig, rows: Sequence[Result], calendar: PuzzleCalendar) -> None:
     ax.set_yticks(range(7), WEEKDAYS)
     ax.invert_yaxis()
     ax.set_xlim(0, 1.43)
+    ax.set_xticks([])
     ax.tick_params(length=0, colors=_TEXT, labelsize=8)
     for bar, count, perfect, values in zip(bars, counts, perfects, scores, strict=True):
         y = bar.get_y() + bar.get_height() / 2
