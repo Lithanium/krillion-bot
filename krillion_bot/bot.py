@@ -70,9 +70,7 @@ class KrillionBot(discord.Client):
         return set(self.config.admin_user_ids) | self.service.storage.admins(guild_id)
 
     def is_admin(self, user: discord.abc.User, guild_id: int) -> bool:
-        if user.id in self.admin_ids(guild_id):
-            return True
-        return isinstance(user, discord.Member) and user.guild_permissions.manage_guild
+        return user.id in self.admin_ids(guild_id)
 
     async def _messageable(self, channel_id: int) -> discord.abc.Messageable | None:
         channel = self.get_channel(channel_id)

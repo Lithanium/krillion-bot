@@ -90,8 +90,8 @@ SQLite on disk, ~60 MB RAM, no other services.
   - `/krillion puzzle` – which puzzle is live and when it resets (in each
     user's local time)
 
-  Admin (`/krillion admin ban`) — for `ADMIN_USER_IDS`,
-  delegated admins, and anyone with *Manage Server*
+  Admin (`/krillion admin ban`) — for `ADMIN_USER_IDS` and delegated admins
+  only; server permissions such as *Manage Server* grant nothing
   - `ban <member> [reason]` – banned divers'
     results are ignored (🚫 reaction) and they are hidden from boards
 

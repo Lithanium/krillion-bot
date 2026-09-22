@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import discord
 import pytest
 from test_bot import run_command as run
 
@@ -223,3 +224,22 @@ def test_admin_ban(kb):
     a = Fake(ADMIN, name="admin")
     run(kb, "krillion admin ban", a, member(2, "bob"))
     assert "already banned" in a.embed.description
+
+
+def test_manage_server_is_not_admin(kb):
+    mod = Fake(5, name="mod")
+
+    class Mod(discord.Member):
+        def __init__(self):
+            pass
+
+        id = 5
+        display_name = "mod"
+        mention = "<@5>"
+        guild_permissions = discord.Permissions(manage_guild=True, administrator=True)
+
+    mod.user = Mod()
+    run(kb, "krillion admin ban", mod, member(2, "bob"))
+    assert mod.sent[-1][2] is True
+    assert "admin" in mod.embed.description.lower()
+    assert post(kb, 2, "bob", share(58, 700)).status.value != "banned"
