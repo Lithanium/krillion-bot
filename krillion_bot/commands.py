@@ -198,8 +198,12 @@ def register(bot: KrillionBot) -> app_commands.Group:
                 embed=alert(f"`{name}` has no contested Krillion days to plot yet.")
             )
             return
-        embed = rating_embed(name, summary, len(history), performance=performance)
-        await interaction.followup.send(embed=embed, file=png_file(png, "krillion-rating.png"))
+        contested = [e for e in history if e.performance is not None]
+        games = len(contested) if performance else len(history)
+        embed = rating_embed(name, summary, games, performance=performance)
+        file = png_file(png, "krillion-rating.png")
+        embed.set_image(url=f"attachment://{file.filename}")
+        await interaction.followup.send(embed=embed, file=file)
 
     @group.command(description="Rating graph for a diver.")
     @app_commands.describe(member="Whose rating (default: you)")

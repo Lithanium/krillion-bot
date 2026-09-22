@@ -11,10 +11,8 @@ from __future__ import annotations
 import io
 import unicodedata
 from collections.abc import Sequence
-from datetime import timedelta
 
 import matplotlib
-from matplotlib import dates as mdates
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
@@ -154,12 +152,29 @@ def draw_names(
 # -- rating graph --------------------------------------------------------------
 
 
+BAND_COLORS = (
+    "#CCCCCC",
+    "#77FF77",
+    "#77DDBB",
+    "#AAAAFF",
+    "#FF88FF",
+    "#FFCC88",
+    "#FFBB55",
+    "#FF7777",
+    "#FF3333",
+    "#AA0000",
+)
+"""tle-gf's ``color_graph`` per rank, in :data:`RANKS` order."""
+
+
 def rating_chart(
     name: str, entries: Sequence[RatingEntry], calendar: PuzzleCalendar, *, performances: bool
 ) -> bytes | None:
-    """Rating (or per-day performance) over time on the Codeforces rank bands.
+    """tle-gf's Akari rating / performance graph (``_plot_akari_multi``) for one diver.
 
-    ``None`` when ``performances`` is asked for but every rated day was solo.
+    Default 7x3.5 in figure, rank bands under the line, legend ``name (rating)``
+    above the axes. ``None`` when ``performances`` is asked for but every rated
+    day was solo.
     """
     if performances:
         points = [
@@ -173,9 +188,9 @@ def rating_chart(
         return None
     days = [d for d, _ in points]
     values = [v for _, v in points]
-    fig = figure(9, 4.5)
-    ax = fig.add_axes((0.08, 0.14, 0.9, 0.76))
-    ax.set_facecolor(PANEL)
+    fig = Figure(figsize=(7.0, 3.5), dpi=DPI)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot()
     ax.plot(
         days,
         values,
@@ -185,28 +200,25 @@ def rating_chart(
         markersize=3,
         markerfacecolor="white",
         markeredgewidth=0.5,
-        zorder=3,
     )
-    lo = min(min(values) - 50, 1100)
-    hi = max(max(values) + 50, 1500)
-    ax.set_ylim(lo, hi)
-    for rank in RANKS:
-        ax.axhspan(rank.low, rank.high, facecolor=band_color(rank.color), alpha=0.8, zorder=0)
-    pad = timedelta(days=3 if len(days) == 1 else 0)
-    ax.set_xlim(days[0] - pad, days[-1] + pad)
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=8))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-    ax.grid(axis="x", color=PANEL, linewidth=0.5)
-    ax.tick_params(colors=MUTED, labelsize=8)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    current = entries[-1].rating_after
-    what = "performance" if performances else "rating"
-    ax.set_title(
-        f"{safe_name(name)} ({round(current)})  ·  Krillion {what}",
-        loc="left",
-        color=name_color(current),
-        fontsize=10,
-        weight="bold",
+    ax.set_ylim(min(min(values) - 50, 1100), max(max(values) + 50, 1500))
+    ymin, ymax = ax.get_ylim()
+    bgcolor = ax.get_facecolor()
+    for rank, color in zip(RANKS, BAND_COLORS, strict=True):
+        ax.axhspan(
+            rank.low, rank.high, facecolor=color, alpha=0.8, edgecolor=bgcolor, linewidth=0.5
+        )
+    for loc in ax.get_xticks():
+        ax.axvline(loc, color=bgcolor, linewidth=0.5)
+    ax.set_ylim(ymin, ymax)
+    fig.autofmt_xdate()
+    ax.legend(
+        [f"{safe_name(name)} ({round(entries[-1].rating_after)})"],
+        bbox_to_anchor=(0, 1, 1, 0),
+        loc="lower left",
+        mode="expand",
+        ncol=1,
     )
-    return png(fig)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor=bgcolor, bbox_inches="tight", pad_inches=0.25)
+    return buf.getvalue()
