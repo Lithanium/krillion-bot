@@ -111,8 +111,6 @@ SQLite on disk, ~60 MB RAM, no other services.
   - `config channel <results|leaderboard|weekly> [channel]` – per-server
     channel settings; leaving `channel` empty restores the `.env` default
 
-  `/leaderboard`, `/elo`, `/stats`, `/puzzle` and `/invalidate` remain as
-  top-level aliases of the matching `/krillion` commands.
 - **Admins** are the Discord user IDs in `ADMIN_USER_IDS` (default:
   `750888871696269402`), plus anyone added with `/krillion admin admins` and
   members with the *Manage Server* permission.
@@ -224,7 +222,7 @@ krillion_bot/
   render.py         leaderboard PNG
   charts.py         rating / performance graph PNG
   discord_util.py   shared reply / attachment helpers
-  commands.py       /krillion public commands (+ legacy top-level aliases)
+  commands.py       /krillion public commands
   commands_admin.py /krillion admin and config subgroups
   bot.py            Discord glue (events, scheduler, weekly recap, imports)
 deploy/          deploy.sh, setup-vm.sh, systemd unit

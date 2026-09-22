@@ -1,14 +1,10 @@
-"""``/krillion`` slash-command group: the public, read-mostly commands.
+"""``/krillion`` slash-command group: the public commands.
 
-Every subcommand is also exposed under its historical top-level name where one
-existed (``/leaderboard``, ``/elo``, ``/stats``, ``/puzzle``), so nothing a
-server already relies on changes. Admin and config subgroups live in
-:mod:`commands_admin`.
+Admin and config subgroups live in :mod:`commands_admin`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -17,7 +13,7 @@ from discord import app_commands
 
 from . import analytics
 from .charts import rating_chart
-from .discord_util import SERVER_ONLY, board_message, png_file, reply, resolve_puzzle
+from .discord_util import board_message, guild_of, png_file, reply, resolve_puzzle
 from .formatting import final_table, live_table, ratings_table
 from .service import MAX_INACTIVE_DAYS, SubmitStatus
 from .views import (
@@ -36,8 +32,6 @@ from .views import (
 if TYPE_CHECKING:
     from .bot import KrillionBot
 
-Handler = Callable[..., Awaitable[None]]
-
 TIMEFRAME_CHOICES = [
     app_commands.Choice(name=label, value=value) for value, label in TIMEFRAME_LABEL.items()
 ]
@@ -48,28 +42,14 @@ PUZZLE_DESCRIBE = {
 }
 
 
-def expose(
-    group: app_commands.Group,
-    tree: app_commands.CommandTree,
-    fn: Handler,
-    *,
-    name: str,
-    description: str,
-    legacy: str | None = None,
-) -> None:
-    """Register ``fn`` as ``/krillion <name>`` and, optionally, as top-level ``/<legacy>``."""
-    group.add_command(app_commands.Command(name=name, description=description, callback=fn))
-    if legacy:
-        tree.add_command(app_commands.Command(name=legacy, description=description, callback=fn))
-
-
 def register(bot: KrillionBot) -> app_commands.Group:
-    tree = bot.tree
     service = bot.service
     storage = service.storage
     calendar = service.calendar
     group = app_commands.Group(
-        name="krillion", description="Krillion daily puzzle: results, ratings and stats."
+        name="krillion",
+        description="Krillion daily puzzle: results, ratings and stats.",
+        guild_only=True,
     )
 
     def names_for(guild_id: int) -> dict[int, str]:
@@ -80,14 +60,12 @@ def register(bot: KrillionBot) -> app_commands.Group:
 
     # -- boards ----------------------------------------------------------
 
+    @group.command(description="Today's Krillion scores (or a past puzzle).")
     @app_commands.describe(**PUZZLE_DESCRIBE)
     async def leaderboard(
         interaction: discord.Interaction, puzzle: int | None = None, date: str | None = None
     ) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         now = bot.now()
         n, error = resolve_puzzle(calendar, now, puzzle, date)
         if n is None:
@@ -121,21 +99,10 @@ def register(bot: KrillionBot) -> app_commands.Group:
         )
         await interaction.response.send_message(**board_message(board, f"krillion-{n}-live.png"))
 
-    expose(
-        group,
-        tree,
-        leaderboard,
-        name="leaderboard",
-        description="Today's Krillion scores (or a past puzzle).",
-        legacy="leaderboard",
-    )
-
+    @group.command(description="Krillion rating rankings for this server.")
     @app_commands.describe(inactive=f"Also list divers idle for {MAX_INACTIVE_DAYS}+ days")
     async def ratings(interaction: discord.Interaction, inactive: bool = False) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         players = service.ranked_players(guild_id, bot.now(), inactive)
         table = ratings_table(players, storage.games_played(guild_id))
         if table is None:
@@ -143,15 +110,7 @@ def register(bot: KrillionBot) -> app_commands.Group:
             return
         await interaction.response.send_message(**board_message(table, "krillion-ratings.png"))
 
-    expose(
-        group,
-        tree,
-        ratings,
-        name="ratings",
-        description="Krillion rating rankings for this server.",
-        legacy="elo",
-    )
-
+    @group.command(description="Who wins the most Krillion days.")
     @app_commands.describe(
         timeframe="Which puzzles to count (default: all time)",
         ties="Rank by total wins including shared days",
@@ -160,10 +119,7 @@ def register(bot: KrillionBot) -> app_commands.Group:
     async def top(
         interaction: discord.Interaction, timeframe: str = "all", ties: bool = False
     ) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         low, high = analytics.puzzle_range(calendar, timeframe, today())
         hidden = storage.hidden_users(guild_id)
         rows = [r for r in storage.results_between(guild_id, low, high) if r.user_id not in hidden]
@@ -174,16 +130,12 @@ def register(bot: KrillionBot) -> app_commands.Group:
         table = top_table(entries[:25], names_for(guild_id), TIMEFRAME_LABEL[timeframe], ties)
         await interaction.response.send_message(**board_message(table, "krillion-top.png"))
 
-    expose(group, tree, top, name="top", description="Who wins the most Krillion days.")
-
     # -- personal --------------------------------------------------------
 
+    @group.command(description="Krillion stats for you or another diver.")
     @app_commands.describe(member="Whose stats (default: you)")
     async def stats(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         target = member or interaction.user
         player = storage.get_player(guild_id, target.id)
         if player is None:
@@ -203,22 +155,10 @@ def register(bot: KrillionBot) -> app_commands.Group:
         opted_out = target.id in storage.opted_out(guild_id)
         await reply(interaction, stats_text(player.display_name, summary, opted_out))
 
-    expose(
-        group,
-        tree,
-        stats,
-        name="stats",
-        description="Krillion stats for you or another diver.",
-        legacy="stats",
-    )
-
-    async def _rating_like(
+    async def rating_like(
         interaction: discord.Interaction, member: discord.Member | None, performance: bool
     ) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         target = member or interaction.user
         history = storage.history_for_user(guild_id, target.id)
         if not history:
@@ -235,78 +175,54 @@ def register(bot: KrillionBot) -> app_commands.Group:
             return
         await interaction.response.send_message(text, file=png_file(png, "krillion-rating.png"))
 
+    @group.command(description="Rating graph for a diver.")
     @app_commands.describe(member="Whose rating (default: you)")
     async def rating(
         interaction: discord.Interaction, member: discord.Member | None = None
     ) -> None:
-        await _rating_like(interaction, member, performance=False)
+        await rating_like(interaction, member, performance=False)
 
+    @group.command(description="Rating graph with each day's performance marked.")
     @app_commands.describe(member="Whose performances (default: you)")
     async def performance(
         interaction: discord.Interaction, member: discord.Member | None = None
     ) -> None:
-        await _rating_like(interaction, member, performance=True)
+        await rating_like(interaction, member, performance=True)
 
-    expose(group, tree, rating, name="rating", description="Rating graph for a diver.")
-    expose(
-        group,
-        tree,
-        performance,
-        name="performance",
-        description="Rating graph with each day's performance marked.",
-    )
-
+    @group.command(description="A diver's rated days, newest first.")
     @app_commands.describe(member="Whose history (default: you)", page="Page number")
     async def history(
         interaction: discord.Interaction, member: discord.Member | None = None, page: int = 1
     ) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
         target = member or interaction.user
-        entries = storage.history_for_user(guild_id, target.id)
-        text, _ = history_page(target.display_name, entries, calendar, page)
-        await reply(interaction, text)
+        entries = storage.history_for_user(guild_of(interaction), target.id)
+        await reply(interaction, history_page(target.display_name, entries, calendar, page))
 
-    expose(group, tree, history, name="history", description="A diver's rated days, newest first.")
-
+    @group.command(description="Current and longest daily streaks.")
     @app_commands.describe(member="Whose streak (default: you)")
     async def streak(
         interaction: discord.Interaction, member: discord.Member | None = None
     ) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
         target = member or interaction.user
-        rows = storage.results_for_user(guild_id, target.id)
+        rows = storage.results_for_user(guild_of(interaction), target.id)
         current = calendar.current(bot.now())
         play = analytics.streaks((r.puzzle_number for r in rows), current)
         perfect = analytics.streaks(analytics.perfect_puzzles(rows), current)
         await reply(interaction, streak_text(target.display_name, play, perfect))
 
-    expose(group, tree, streak, name="streak", description="Current and longest daily streaks.")
-
+    @group.command(description="Puzzles a diver missed since they started.")
     @app_commands.describe(member="Whose skips (default: you)")
     async def skips(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
         target = member or interaction.user
-        rows = storage.results_for_user(guild_id, target.id)
+        rows = storage.results_for_user(guild_of(interaction), target.id)
         first, skipped = analytics.skipped_puzzles(
             (r.puzzle_number for r in rows), calendar.current(bot.now())
         )
         await reply(interaction, skips_text(target.display_name, first, skipped, calendar))
 
-    expose(
-        group, tree, skips, name="skips", description="Puzzles a diver missed since they started."
-    )
-
     # -- comparisons -----------------------------------------------------
 
+    @group.command(description="Head-to-head record between divers.")
     @app_commands.describe(
         player1="First diver",
         player2="Second diver",
@@ -325,10 +241,7 @@ def register(bot: KrillionBot) -> app_commands.Group:
         timeframe: str = "all",
         missing: bool = False,
     ) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         members = [m for m in (player1, player2, player3, player4) if m is not None]
         ids = [m.id for m in members]
         if len(set(ids)) != len(ids):
@@ -343,14 +256,10 @@ def register(bot: KrillionBot) -> app_commands.Group:
         names = {m.id: m.display_name for m in members}
         await reply(interaction, vs_text(outcome, names, TIMEFRAME_LABEL[timeframe], missing))
 
-    expose(group, tree, vs, name="vs", description="Head-to-head record between divers.")
-
+    @group.command(description="Weekly recap: daily winners and standings.")
     @app_commands.describe(when="A date in the week (YYYY-MM-DD) or 'last' (default: this week)")
     async def week(interaction: discord.Interaction, when: str | None = None) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         now_day = today()
         if when is None:
             anchor = now_day
@@ -373,10 +282,9 @@ def register(bot: KrillionBot) -> app_commands.Group:
             week_text(recap, names, interaction.user.id), **bot.week_board(recap, names)
         )
 
-    expose(group, tree, week, name="week", description="Weekly recap: daily winners and standings.")
-
     # -- participation ---------------------------------------------------
 
+    @group.command(description="Which Krillion puzzle is live and when it resets.")
     async def puzzle(interaction: discord.Interaction) -> None:
         now = bot.now()
         n = calendar.current(now)
@@ -385,22 +293,10 @@ def register(bot: KrillionBot) -> app_commands.Group:
             interaction, f"Krillion **#{n}** is live. Resets <t:{reset}:t> (<t:{reset}:R>)."
         )
 
-    expose(
-        group,
-        tree,
-        puzzle,
-        name="puzzle",
-        description="Which Krillion puzzle is live and when it resets.",
-        legacy="puzzle",
-    )
-
+    @group.command(description="Record a 0 for today so it counts.")
     async def giveup(interaction: discord.Interaction) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
         outcome = service.give_up(
-            guild_id=guild_id,
+            guild_id=guild_of(interaction),
             user_id=interaction.user.id,
             display_name=interaction.user.display_name,
             channel_id=interaction.channel_id or 0,
@@ -424,24 +320,16 @@ def register(bot: KrillionBot) -> app_commands.Group:
         else:
             await reply(interaction, f"Krillion #{n} isn't accepting results.", ephemeral=True)
 
-    expose(group, tree, giveup, name="giveup", description="Record a 0 for today so it counts.")
-
+    @group.command(description="Show yourself on public boards.")
     async def register(interaction: discord.Interaction) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
-        if storage.opt_in(guild_id, interaction.user.id):
+        if storage.opt_in(guild_of(interaction), interaction.user.id):
             await reply(interaction, "Welcome back — you're on the public boards again. 🦐")
         else:
             await reply(interaction, "You're already on the public boards. 🦐", ephemeral=True)
 
+    @group.command(description="Hide yourself from the ratings and winners boards.")
     async def unregister(interaction: discord.Interaction) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
-        if storage.opt_out(guild_id, interaction.user.id, bot.now()):
+        if storage.opt_out(guild_of(interaction), interaction.user.id, bot.now()):
             await reply(
                 interaction,
                 "You're hidden from the ratings and winners boards. Your results still count; "
@@ -451,20 +339,9 @@ def register(bot: KrillionBot) -> app_commands.Group:
         else:
             await reply(interaction, "You're already hidden from the boards.", ephemeral=True)
 
-    expose(group, tree, register, name="register", description="Show yourself on public boards.")
-    expose(
-        group,
-        tree,
-        unregister,
-        name="unregister",
-        description="Hide yourself from the ratings and winners boards.",
-    )
-
+    @group.command(description="How Krillion is configured here.")
     async def show(interaction: discord.Interaction) -> None:
-        guild_id = interaction.guild_id
-        if guild_id is None:
-            await reply(interaction, SERVER_ONLY, ephemeral=True)
-            return
+        guild_id = guild_of(interaction)
         await reply(
             interaction,
             settings_text(
@@ -480,7 +357,5 @@ def register(bot: KrillionBot) -> app_commands.Group:
             ephemeral=True,
         )
 
-    expose(group, tree, show, name="show", description="How Krillion is configured here.")
-
-    tree.add_command(group)
+    bot.tree.add_command(group)
     return group

@@ -1,10 +1,10 @@
-import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from test_bot import run_command as run
 
 from krillion_bot.bot import KrillionBot
 
@@ -16,7 +16,7 @@ ADMIN = 750888871696269402
 @dataclass
 class Fake:
     user_id: int
-    guild_id: int | None = 1
+    guild_id: int = 1
     name: str = "alice"
     sent: list = field(default_factory=list)
     files: list = field(default_factory=list)
@@ -52,15 +52,6 @@ class Fake:
 
 def member(uid: int, name: str):
     return SimpleNamespace(id=uid, display_name=name, mention=f"<@{uid}>")
-
-
-def run(bot: KrillionBot, path: str, interaction, *args, **kwargs):
-    parts = path.split()
-    command = bot.tree.get_command(parts[0])
-    for part in parts[1:]:
-        command = command.get_command(part)
-    assert command is not None, path
-    return asyncio.run(command.callback(interaction, *args, **kwargs))
 
 
 def share(n: int, score: int, tiers: str = "🦑🦑🦑🦑🦑🐟🫧") -> str:
@@ -112,12 +103,6 @@ def test_all_subcommands_registered(kb):
     assert {c.name for c in group.get_command("config").commands} == {"channel"}
 
 
-def test_server_only(kb):
-    dm = Fake(1, guild_id=None)
-    run(kb, "krillion stats", dm)
-    assert dm.sent[-1][1] is True and "server" in dm.text.lower()
-
-
 def test_stats_and_streak(seeded):
     i = Fake(1)
     run(seeded, "krillion stats", i)
@@ -125,7 +110,7 @@ def test_stats_and_streak(seeded):
     assert "**alice**" in text and "2 played" in text and "Best 700" in text
     assert "1 win" in text and "streak" in text.lower() and "Rating **" in text
     i = Fake(1)
-    run(seeded, "stats", i, member(2, "bob"))
+    run(seeded, "krillion stats", i, member(2, "bob"))
     assert "bob" in i.text
     i = Fake(1)
     run(seeded, "krillion stats", i, member(9, "nobody"))
@@ -208,7 +193,7 @@ def test_week(seeded):
 
 def test_leaderboard_ratings_puzzle(seeded):
     i = Fake(1)
-    run(seeded, "leaderboard", i)
+    run(seeded, "krillion leaderboard", i)
     i.board("krillion-58-live.png", "Krillion #58 — live")
     i = Fake(1)
     run(seeded, "krillion leaderboard", i, 57)
@@ -217,10 +202,10 @@ def test_leaderboard_ratings_puzzle(seeded):
     run(seeded, "krillion leaderboard", i, 50)
     assert "no results yet" in i.text
     i = Fake(1)
-    run(seeded, "elo", i)
+    run(seeded, "krillion ratings", i)
     i.board("krillion-ratings.png", "Ratings")
     i = Fake(1)
-    run(seeded, "puzzle", i)
+    run(seeded, "krillion puzzle", i)
     assert "**#58**" in i.text
 
 
@@ -271,7 +256,7 @@ def test_admin_add_remove_delete(kb):
     run(kb, "krillion admin add", a, member(2, "bob"), 300, 57)
     assert "recalculated across 1 closed day" in a.text
     a = Fake(ADMIN, name="admin")
-    run(kb, "invalidate", a, member(1, "alice"), 58)
+    run(kb, "krillion admin remove", a, member(1, "alice"), 58)
     assert "invalidated by" in a.text
     a = Fake(ADMIN, name="admin")
     run(kb, "krillion admin delete", a, 57)

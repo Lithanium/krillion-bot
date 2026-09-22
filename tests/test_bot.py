@@ -55,9 +55,11 @@ class FakeInteraction:
         self.sent.append((content, kwargs.get("ephemeral", False)))
 
 
-def run_command(bot: KrillionBot, name: str, interaction, *args, **kwargs):
-    command = bot.tree.get_command(name)
-    assert command is not None
+def run_command(bot: KrillionBot, path: str, interaction, *args, **kwargs):
+    command = bot.tree
+    for part in path.split():
+        command = command.get_command(part)
+    assert command is not None, path
     return asyncio.run(command.callback(interaction, *args, **kwargs))
 
 
@@ -82,14 +84,7 @@ def make_config(tmp_path: Path, **overrides) -> Config:
 
 def test_build_registers_commands_and_creates_db(tmp_path):
     b = build(make_config(tmp_path))
-    assert {c.name for c in b.tree.get_commands()} == {
-        "krillion",
-        "leaderboard",
-        "elo",
-        "stats",
-        "puzzle",
-        "invalidate",
-    }
+    assert [c.name for c in b.tree.get_commands()] == ["krillion"]
     assert b.config.admin_user_ids == {ADMIN}
     assert (tmp_path / "db.sqlite3").exists()
     assert b.intents.message_content
@@ -128,7 +123,7 @@ def test_invalidate_requires_admin(bot):
     asyncio.run(bot.on_message(FakeMessage("Krillion #58\n700")))
     alice = SimpleNamespace(id=1, display_name="alice")
     outsider = FakeInteraction(user_id=999)
-    run_command(bot, "invalidate", outsider, alice, 58)
+    run_command(bot, "krillion admin remove", outsider, alice, 58)
     assert outsider.sent == [("Only Krillion admins can do that.", True)]
     assert bot.service.storage.get_result(1, 58, 1).score == 700
 
@@ -138,7 +133,7 @@ def test_invalidate_as_admin(bot, monkeypatch):
     asyncio.run(bot.on_message(FakeMessage("Krillion #58\n700")))
     alice = SimpleNamespace(id=1, display_name="alice")
     admin = FakeInteraction(user_id=ADMIN)
-    run_command(bot, "invalidate", admin, alice, None, "screenshot shows 340")
+    run_command(bot, "krillion admin remove", admin, alice, None, "screenshot shows 340")
     text, ephemeral = admin.sent[0]
     assert not ephemeral
     assert "**alice**'s Krillion #58 score (700) was invalidated by <@750888871696269402>" in text
@@ -147,7 +142,7 @@ def test_invalidate_as_admin(bot, monkeypatch):
     assert bot.service.storage.get_result(1, 58, 1) is None
 
     again = FakeInteraction(user_id=ADMIN)
-    run_command(bot, "invalidate", again, alice, 58)
+    run_command(bot, "krillion admin remove", again, alice, 58)
     assert again.sent == [("**alice** has no Krillion #58 result to remove.", True)]
 
 

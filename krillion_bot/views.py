@@ -160,8 +160,8 @@ def vs_text(outcome: VsOutcome, names: Names, label: str, missing_is_loss: bool)
 
 def history_page(
     name: str, entries: Sequence[RatingEntry], calendar: PuzzleCalendar, page: int
-) -> tuple[str, int]:
-    """One page of a diver's rating history (newest first) and the page count."""
+) -> str:
+    """One page of a diver's rating history, newest first."""
     pages = max(1, -(-len(entries) // HISTORY_PAGE))
     page = min(max(1, page), pages)
     newest = list(reversed(entries))
@@ -176,7 +176,7 @@ def history_page(
         )
     if not chunk:
         lines.append("No rated days yet.")
-    return "\n".join(lines), pages
+    return "\n".join(lines)
 
 
 def _ordinal(n: int) -> str:
@@ -271,12 +271,6 @@ def week_text(recap: WeekRecap, names: Names, viewer: int | None = None) -> str:
                 f"avg {mine.average:.0f} · {mine.solo_wins} wins",
             ]
     return "\n".join(lines)
-
-
-def ratings_title_note(include_inactive: bool, max_inactive: int) -> str | None:
-    if include_inactive:
-        return None
-    return f"_Divers idle for {max_inactive}+ days are hidden; use `inactive: True` to show them._"
 
 
 def settings_text(
