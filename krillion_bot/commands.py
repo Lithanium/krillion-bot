@@ -1,6 +1,6 @@
 """``/krillion`` slash-command group: the public commands.
 
-Admin and config subgroups live in :mod:`commands_admin`.
+The admin subgroup lives in :mod:`commands_admin`.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from .discord_util import (
     board_message,
     guild_of,
     info,
-    ok,
     png_file,
     reply,
     resolve_puzzle,
@@ -28,16 +27,15 @@ from .discord_util import (
 )
 from .formatting import final_table, live_table, ratings_table
 from .plot_stats import stats_plot
-from .service import MAX_INACTIVE_DAYS, SubmitStatus
+from .service import MAX_INACTIVE_DAYS
 from .views import (
     TIMEFRAME_LABEL,
     history_pages,
     rating_embed,
-    settings_embed,
     skips_pages,
     streak_embed,
     top_pages,
-    vs_pages,
+    vs_embed,
 )
 
 if TYPE_CHECKING:
@@ -132,13 +130,11 @@ def register(bot: KrillionBot) -> app_commands.Group:
     ) -> None:
         guild_id = guild_of(interaction)
         low, high = analytics.puzzle_range(calendar, timeframe, today())
-        hidden = storage.hidden_users(guild_id)
-        rows = [r for r in storage.results_between(guild_id, low, high) if r.user_id not in hidden]
+        rows = storage.results_between(guild_id, low, high)
         entries = analytics.top(rows, count_ties=ties)
         if not entries:
-            await reply(
-                interaction, info(f"No contested Krillion days {TIMEFRAME_LABEL[timeframe]}.")
-            )
+            noun = "winners" if ties else "outright winners"
+            await reply(interaction, alert(f"No Krillion {noun} found for this range."))
             return
         await send_pages(
             interaction, top_pages(entries, names_for(guild_id), TIMEFRAME_LABEL[timeframe], ties)
@@ -186,7 +182,7 @@ def register(bot: KrillionBot) -> app_commands.Group:
         history = storage.history_for_user(guild_id, target.id)
         name = target.display_name
         if not history:
-            await reply(interaction, alert(f"`{name}` has no rated Krillion days yet."))
+            await reply(interaction, alert(f"No Krillion rating for `{name}` yet."))
             return
         summary = analytics.summarize(target.id, [], history, calendar, calendar.current(bot.now()))
         await interaction.response.defer()
@@ -194,12 +190,19 @@ def register(bot: KrillionBot) -> app_commands.Group:
             rating_chart, name, history, calendar, performances=performance
         )
         if png is None:
-            await interaction.followup.send(
-                embed=alert(f"`{name}` has no contested Krillion days to plot yet.")
+            message = (
+                f"`{name}` has no contested Krillion days to plot performance for yet."
+                if performance
+                else f"`{name}` has no rated Krillion days to plot yet."
             )
+            await interaction.followup.send(embed=alert(message))
             return
-        embed = rating_embed(name, summary, len(history), performance=performance)
-        await interaction.followup.send(embed=embed, file=png_file(png, "krillion-rating.png"))
+        contested = [e for e in history if e.performance is not None]
+        games = len(contested) if performance else len(history)
+        embed = rating_embed(name, summary, games, performance=performance)
+        file = png_file(png, "krillion-rating.png")
+        embed.set_image(url=f"attachment://{file.filename}")
+        await interaction.followup.send(embed=embed, file=file)
 
     @group.command(description="Rating graph for a diver.")
     @app_commands.describe(member="Whose rating (default: you)")
@@ -224,7 +227,7 @@ def register(bot: KrillionBot) -> app_commands.Group:
         entries = storage.history_for_user(guild_of(interaction), target.id)
         if not entries:
             await reply(
-                interaction, info(f"`{target.display_name}` has no rated Krillion days yet.")
+                interaction, alert(f"`{target.display_name}` has no contested Krillion days yet.")
             )
             return
         await send_pages(
@@ -241,7 +244,13 @@ def register(bot: KrillionBot) -> app_commands.Group:
         current = calendar.current(bot.now())
         play = analytics.streaks((r.puzzle_number for r in rows), current)
         perfect = analytics.streaks(analytics.perfect_puzzles(rows), current)
-        await reply(interaction, streak_embed(target.display_name, play, perfect))
+        latest = max(
+            (r for r in rows if r.puzzle_number <= current),
+            key=lambda r: r.puzzle_number,
+            default=None,
+        )
+        score = latest.score if latest is not None else 0
+        await reply(interaction, streak_embed(target.display_name, play, perfect, score))
 
     @group.command(description="Puzzles a diver missed since they started.")
     @app_commands.describe(member="Whose skips (default: you)")
@@ -284,12 +293,15 @@ def register(bot: KrillionBot) -> app_commands.Group:
         rows = {uid: storage.results_for_user(guild_id, uid, low, high) for uid in ids}
         outcome = analytics.head_to_head(rows, missing_is_loss=missing)
         if outcome.puzzles == 0:
-            await reply(interaction, info(f"No puzzles in common {TIMEFRAME_LABEL[timeframe]}."))
+            message = (
+                "These users have no Krillion puzzles to compare."
+                if len(members) == 2
+                else "These users have no shared Krillion puzzles to compare."
+            )
+            await reply(interaction, alert(message))
             return
         names = {m.id: m.display_name for m in members}
-        await send_pages(
-            interaction, vs_pages(outcome, names, TIMEFRAME_LABEL[timeframe], missing, rows)
-        )
+        await reply(interaction, vs_embed(outcome, names))
 
     @group.command(description="Weekly recap: daily winners and standings.")
     @app_commands.describe(when="A date in the week (YYYY-MM-DD) or 'last' (default: this week)")
@@ -328,82 +340,6 @@ def register(bot: KrillionBot) -> app_commands.Group:
         reset = int(calendar.next_reset(now).timestamp())
         await reply(
             interaction, info(f"Krillion **#{n}** is live. Resets <t:{reset}:t> (<t:{reset}:R>).")
-        )
-
-    @group.command(description="Record a 0 for today so it counts.")
-    async def giveup(interaction: discord.Interaction) -> None:
-        outcome = service.give_up(
-            guild_id=guild_of(interaction),
-            user_id=interaction.user.id,
-            display_name=interaction.user.display_name,
-            channel_id=interaction.channel_id or 0,
-            now=bot.now(),
-        )
-        n = outcome.current_puzzle
-        if outcome.status is SubmitStatus.ACCEPTED:
-            await reply(
-                interaction,
-                ok(
-                    f"Recorded a give-up (score 0) for `{interaction.user.display_name}` "
-                    f"on Krillion #{n}."
-                ),
-            )
-        elif outcome.status is SubmitStatus.DUPLICATE and outcome.existing is not None:
-            await reply(
-                interaction,
-                alert(f"You already have a Krillion #{n} result ({outcome.existing.score})."),
-                ephemeral=True,
-            )
-        elif outcome.status is SubmitStatus.BANNED:
-            await reply(
-                interaction, alert("You're banned from Krillion tracking here."), ephemeral=True
-            )
-        else:
-            await reply(
-                interaction, alert(f"Krillion #{n} isn't accepting results."), ephemeral=True
-            )
-
-    @group.command(description="Show yourself on public boards.")
-    async def register(interaction: discord.Interaction) -> None:
-        if storage.opt_in(guild_of(interaction), interaction.user.id):
-            await reply(interaction, ok("You're back on the public Krillion boards."))
-        else:
-            await reply(
-                interaction, alert("You're already on the public Krillion boards."), ephemeral=True
-            )
-
-    @group.command(description="Hide yourself from the ratings and winners boards.")
-    async def unregister(interaction: discord.Interaction) -> None:
-        if storage.opt_out(guild_of(interaction), interaction.user.id, bot.now()):
-            await reply(
-                interaction,
-                ok(
-                    "You're hidden from the ratings and winners boards. Your results still "
-                    "count; `/krillion register` undoes this."
-                ),
-                ephemeral=True,
-            )
-        else:
-            await reply(
-                interaction, alert("You're already hidden from the boards."), ephemeral=True
-            )
-
-    @group.command(description="How Krillion is configured here.")
-    async def show(interaction: discord.Interaction) -> None:
-        guild_id = guild_of(interaction)
-        await reply(
-            interaction,
-            settings_embed(
-                bot.channel_setting(guild_id, "results_channel"),
-                bot.channel_setting(guild_id, "leaderboard_channel"),
-                bot.channel_setting(guild_id, "weekly_channel"),
-                sorted(bot.admin_ids(guild_id)),
-                len(storage.bans(guild_id)),
-                len(storage.opted_out(guild_id)),
-                calendar.current(bot.now()),
-                today(),
-            ),
-            ephemeral=True,
         )
 
     bot.tree.add_command(group)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import timedelta
 
 from matplotlib.figure import Figure
 
@@ -52,9 +53,10 @@ def _draw_days(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) ->
     for i, day in enumerate(recap.days):
         y = 1 - step * (i + 0.5)
         ax.text(0.04, y, WEEKDAYS[day.day.weekday()], va="center", color=MUTED, fontsize=8)
-        ax.text(0.135, y, f"#{day.puzzle_number}", va="center", color=MUTED, fontsize=8)
+        ax.text(0.135, y, f"{day.day:%m-%d}", va="center", color=MUTED, fontsize=8)
         if day.winners is None:
-            ax.text(0.26, y, "uncontested", va="center", color=MUTED, fontsize=9, style="italic")
+            label = "no results" if day.participants == 0 else "no winner"
+            ax.text(0.26, y, label, va="center", color=MUTED, fontsize=9, style="italic")
             continue
         draw_names(ax, 0.26, y, _labels(names, ratings, day.winners.winners), weight="bold")
         if day.winners.tied:
@@ -81,12 +83,14 @@ def _draw_days(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) ->
     for i in range(len(recap.days), 7):
         y = 1 - step * (i + 0.5)
         ax.text(0.04, y, WEEKDAYS[i], va="center", color=MUTED, fontsize=8)
+        future = recap.start + timedelta(days=i)
+        ax.text(0.135, y, f"{future:%m-%d}", va="center", color=MUTED, fontsize=8)
         ax.text(0.26, y, "up next", va="center", color=MUTED, fontsize=9, style="italic")
 
 
 def _draw_standings(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
-    ax = panel(fig, (0.53, 0.55, 0.43, 0.265), "WEEK LEADERBOARD  ·  TOTAL SCORE", BLUE)
-    top = recap.standings[:6]
+    ax = panel(fig, (0.53, 0.55, 0.43, 0.265), "WEEK LEADERBOARD  ·  WINS", BLUE)
+    top = sorted(recap.standings, key=lambda s: (-s.total_wins, -s.solo_wins, s.user_id))[:6]
     if not top:
         empty_note(ax, "Nobody has played this week.")
         return
@@ -96,10 +100,16 @@ def _draw_standings(fig: Figure, recap: WeekRecap, names: Names, ratings: Rating
         ax.text(0.04, y, f"#{i + 1}", va="center", color=BLUE, fontsize=9, weight="bold")
         draw_names(ax, 0.13, y, [_label(names, ratings, s.user_id)])
         ax.text(
-            0.72, y, str(s.total), va="center", ha="right", color=TEXT, fontsize=9, weight="bold"
+            0.72,
+            y,
+            f"{s.total_wins} win{'s' if s.total_wins != 1 else ''}",
+            va="center",
+            ha="right",
+            color=TEXT,
+            fontsize=9,
+            weight="bold",
         )
-        wins = s.solo_wins + s.tied_wins
-        detail = f"avg {s.average:.0f} · {s.days}d · {wins} win{'s' if wins != 1 else ''}"
+        detail = f"{s.solo_wins} solo · {s.tied_wins} tied"
         ax.text(0.98, y, detail, va="center", ha="right", color=MUTED, fontsize=8)
 
 
@@ -125,9 +135,9 @@ def _draw_standouts(fig: Figure, recap: WeekRecap, names: Names, ratings: Rating
 
 
 def _draw_moves(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
-    ax = panel(fig, (0.04, 0.08, 0.44, 0.225), "RATING MOVERS  ·  THIS WEEK", DARK)
+    ax = panel(fig, (0.04, 0.08, 0.2833, 0.225), "DAILY RATING  ·  THIS WEEK", DARK)
     if not recap.moves:
-        empty_note(ax, "No rating movement this week.")
+        empty_note(ax, "No daily rating movement this week.")
         return
     gains = [m for m in recap.moves if m.delta >= 0][:3]
     losses = [m for m in recap.moves if m.delta < 0][-3:]
@@ -139,7 +149,7 @@ def _draw_moves(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -
         ax.text(0.03, y, "▲" if gaining else "▼", va="center", color=color, fontsize=7)
         draw_names(ax, 0.09, y, [_label(names, ratings, m.user_id)], fontsize=9)
         ax.text(
-            0.83,
+            0.76,
             y,
             f"{round(m.after)}",
             va="center",
@@ -160,26 +170,49 @@ def _draw_moves(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -
         )
 
 
-def _draw_averages(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
-    ax = panel(fig, (0.53, 0.08, 0.43, 0.225), "AVERAGE SCORE  ·  TOP DIVERS", BLUE)
-    top = sorted(recap.standings, key=lambda s: -s.average)[:6]
+def _draw_scores(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
+    ax = panel(fig, (0.3583, 0.08, 0.2833, 0.225), "TOTAL SCORE  ·  THIS WEEK", BLUE)
+    top = sorted(recap.standings, key=lambda s: (-s.total, -s.average, s.user_id))[:6]
     if not top:
-        empty_note(ax, "Nobody has played this week.")
+        empty_note(ax, "No results this week.")
         return
     step = 1 / 6
     for i, s in enumerate(top):
         y = 1 - step * (i + 0.5)
-        name, color = _label(names, ratings, s.user_id, 14)
-        ax.barh(y, 0.62 * s.average / 700, left=0.30, height=step * 0.6, color=color, alpha=0.85)
-        draw_names(ax, 0.03, y, [(name, color)], fontsize=8)
+        ax.text(0.03, y, f"#{i + 1}", va="center", color=BLUE, fontsize=8, weight="bold")
+        draw_names(ax, 0.13, y, [_label(names, ratings, s.user_id, 14)], fontsize=8)
         ax.text(
             0.98,
             y,
-            f"{s.average:.0f}",
+            f"{s.total}  avg {s.average:.0f}",
             va="center",
             ha="right",
             color=TEXT,
-            fontsize=9,
+            fontsize=8,
+            weight="bold",
+        )
+
+
+def _draw_averages(fig: Figure, recap: WeekRecap, names: Names, ratings: Ratings) -> None:
+    ax = panel(fig, (0.6767, 0.08, 0.2833, 0.225), "BEST AVERAGE  ·  FULL WEEK ONLY", AMBER)
+    elapsed = sum(day.day <= recap.end for day in recap.days)
+    top = [s for s in recap.standings if s.days == elapsed]
+    top.sort(key=lambda s: (-s.average, s.user_id))
+    if not top:
+        empty_note(ax, "Nobody played every day this week.")
+        return
+    for i, s in enumerate(top[:6]):
+        y = 1 - (i + 0.5) / 6
+        ax.text(0.03, y, f"#{i + 1}", va="center", color=AMBER, fontsize=8, weight="bold")
+        draw_names(ax, 0.13, y, [_label(names, ratings, s.user_id, 14)], fontsize=8)
+        ax.text(
+            0.98,
+            y,
+            f"{s.average:.0f}  {s.days} days",
+            va="center",
+            ha="right",
+            color=TEXT,
+            fontsize=8,
             weight="bold",
         )
 
@@ -188,10 +221,12 @@ def _personal(recap: WeekRecap, viewer: int | None) -> str:
     mine = next((s for s in recap.standings if s.user_id == viewer), None)
     if mine is None:
         return "YOU HAVE NO RESULTS THIS WEEK" if viewer is not None else ""
-    rank = recap.standings.index(mine) + 1
-    parts = [f"{mine.days} PLAYED", f"{mine.total} PTS", f"{mine.best} BEST"]
+    wins_board = sorted(recap.standings, key=lambda s: (-s.total_wins, -s.solo_wins, s.user_id))
+    rank = wins_board.index(mine) + 1
+    parts = [f"{mine.days} PLAYED", f"{mine.perfects} PERFECT"]
     if mine.solo_wins or mine.tied_wins:
         parts.append(f"{mine.solo_wins} SOLO WIN(S) · {mine.tied_wins} TIED")
+    parts.append(f"{mine.best} BEST")
     parts.append(f"#{rank} ON THE BOARD")
     return "YOUR WEEK  ·  " + "  ·  ".join(parts)
 
@@ -215,22 +250,27 @@ def week_plot(
     )
     status = "IN PROGRESS" if recap.in_progress else "FINAL"
     if recap.standings:
-        leader = recap.standings[0]
+        leader = sorted(recap.standings, key=lambda s: (-s.total_wins, -s.solo_wins, s.user_id))[0]
         name, _ = _label(names, ratings, leader.user_id)
-        status = f"{name} leads · {leader.total} pts  ·  {status}"
+        wins = leader.total_wins
+        status = f"{name} leads · {wins} win{'s' if wins != 1 else ''}  ·  {status}"
     header.text(
         1, 0.3, status, color=AMBER if recap.in_progress else MUTED, fontsize=9, weight="bold",
         ha="right",
     )  # fmt: skip
 
-    played = [d for d in recap.days if d.winners is not None]
+    played = [d for d in recap.days if d.participants > 0]
     kpi_strip(
         fig,
         [
             (str(recap.players), "PLAYERS", GREEN),
             (str(recap.results), "RESULTS", GREEN),
             (f"{len(played)}/7", "DAYS PLAYED", BLUE),
-            (str(sum(1 for d in played if d.winners and not d.winners.tied)), "DECIDED", BLUE),
+            (
+                str(sum(1 for d in played if d.winners and not d.winners.tied)),
+                "DECIDED OUTRIGHT",
+                BLUE,
+            ),
             (str(sum(1 for d in played if d.winners and d.winners.tied)), "TIED DAYS", AMBER),
         ],
         GREEN,
@@ -239,6 +279,7 @@ def week_plot(
     _draw_standings(fig, recap, names, ratings)
     _draw_standouts(fig, recap, names, ratings)
     _draw_moves(fig, recap, names, ratings)
+    _draw_scores(fig, recap, names, ratings)
     _draw_averages(fig, recap, names, ratings)
     fig.text(0.04, 0.03, _personal(recap, viewer), color=TEXT, fontsize=9, weight="bold")
     fig.text(

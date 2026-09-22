@@ -129,35 +129,6 @@ def test_on_message_duplicate(bot):
     assert "340" in msg.replies[0]
 
 
-def test_invalidate_requires_admin(bot):
-    asyncio.run(bot.on_message(FakeMessage("Krillion #58\n700")))
-    alice = SimpleNamespace(id=1, display_name="alice")
-    outsider = FakeInteraction(user_id=999)
-    run_command(bot, "krillion admin remove", outsider, alice, 58)
-    assert outsider.embed.description == "Only Krillion admins can do that."
-    assert outsider.sent[-1][2] is True
-    assert bot.service.storage.get_result(1, 58, 1).score == 700
-
-
-def test_invalidate_as_admin(bot, monkeypatch):
-    monkeypatch.setattr("krillion_bot.bot._now", lambda: NOW)
-    asyncio.run(bot.on_message(FakeMessage("Krillion #58\n700")))
-    alice = SimpleNamespace(id=1, display_name="alice")
-    admin = FakeInteraction(user_id=ADMIN)
-    run_command(bot, "krillion admin remove", admin, alice, None, "screenshot shows 340")
-    assert not admin.sent[0][2]
-    description = admin.embed.description
-    assert "Removed `alice`'s Krillion #58 score (700)" in description
-    assert "Reason: screenshot shows 340" in description
-    assert "corrected result" in description
-    assert bot.service.storage.get_result(1, 58, 1) is None
-
-    again = FakeInteraction(user_id=ADMIN)
-    run_command(bot, "krillion admin remove", again, alice, 58)
-    assert again.embed.description == "`alice` has no Krillion #58 result to remove."
-    assert again.sent[-1][2] is True
-
-
 def test_results_channel_filter(tmp_path):
     cfg = make_config(tmp_path, results_channel_id=10)
     service = KrillionService(Storage(":memory:"), PuzzleCalendar())
