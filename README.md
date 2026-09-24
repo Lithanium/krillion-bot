@@ -90,10 +90,11 @@ SQLite on disk, ~60 MB RAM, no other services.
   - `/krillion puzzle` – which puzzle is live and when it resets (in each
     user's local time)
 
-  Admin (`/krillion admin ban`) — for `ADMIN_USER_IDS` and delegated admins
+  Admin (`/krillion admin ban|unban`) — for `ADMIN_USER_IDS` and delegated admins
   only; server permissions such as *Manage Server* grant nothing
   - `ban <member> [reason]` – banned divers'
     results are ignored (🚫 reaction) and they are hidden from boards
+  - `unban <member>` – lift a ban; their results count again
 
 - **Admins** are the Discord user IDs in `ADMIN_USER_IDS` (default:
   `750888871696269402`), plus delegated admins and members with the *Manage
@@ -209,7 +210,7 @@ krillion_bot/
   plot_week.py      weekly recap dashboard
   discord_util.py   embeds, pagination, attachments
   commands.py       /krillion public commands
-  commands_admin.py /krillion admin ban subgroup
+  commands_admin.py /krillion admin ban/unban subgroup
   bot.py            Discord glue (events, scheduler, weekly recap)
 deploy/          deploy.sh, setup-vm.sh, systemd unit
 tests/

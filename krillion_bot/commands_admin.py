@@ -15,7 +15,9 @@ if TYPE_CHECKING:
 
 def register(bot: KrillionBot, parent: app_commands.Group) -> None:
     storage = bot.service.storage
-    admin = app_commands.Group(name="admin", description="[Admin] Ban divers.", parent=parent)
+    admin = app_commands.Group(
+        name="admin", description="[Admin] Ban and unban divers.", parent=parent
+    )
 
     async def gate(interaction: discord.Interaction) -> int | None:
         """The guild id if the caller is an admin, else ``None`` after replying."""
@@ -44,3 +46,18 @@ def register(bot: KrillionBot, parent: app_commands.Group) -> None:
         if reason:
             text += f"\nReason: {reason}"
         await reply(interaction, ok(text))
+
+    @app_commands.describe(member="Who to unban")
+    @admin.command(description="[Admin] Lift a diver's ban.")
+    async def unban(interaction: discord.Interaction, member: discord.Member) -> None:
+        guild_id = await gate(interaction)
+        if guild_id is None:
+            return
+        if not storage.unban(guild_id, member.id):
+            await reply(
+                interaction, alert(f"`{member.display_name}` is not banned."), ephemeral=True
+            )
+            return
+        await reply(
+            interaction, ok(f"Unbanned `{member.display_name}`; their results count again.")
+        )
