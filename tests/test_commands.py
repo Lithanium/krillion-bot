@@ -101,7 +101,7 @@ def test_all_subcommands_registered(kb):
         "streak", "skips", "vs", "week", "puzzle", "admin",
     }  # fmt: skip
     admin = {c.name for c in group.get_command("admin").commands}
-    assert admin == {"ban"}
+    assert admin == {"ban", "unban"}
 
 
 def test_stats_and_streak(seeded):
@@ -226,6 +226,18 @@ def test_admin_ban(kb):
     assert "already banned" in a.embed.description
 
 
+def test_admin_unban(kb):
+    a = Fake(ADMIN, name="admin")
+    run(kb, "krillion admin unban", a, member(2, "bob"))
+    assert a.sent[-1][2] is True
+    assert "not banned" in a.embed.description
+    run(kb, "krillion admin ban", Fake(ADMIN, name="admin"), member(2, "bob"))
+    a = Fake(ADMIN, name="admin")
+    run(kb, "krillion admin unban", a, member(2, "bob"))
+    assert "Unbanned `bob`" in a.embed.description
+    assert post(kb, 2, "bob", share(58, 700)).status.value == "accepted"
+
+
 def test_manage_server_is_not_admin(kb):
     mod = Fake(5, name="mod")
 
@@ -243,3 +255,7 @@ def test_manage_server_is_not_admin(kb):
     assert mod.sent[-1][2] is True
     assert "admin" in mod.embed.description.lower()
     assert post(kb, 2, "bob", share(58, 700)).status.value != "banned"
+    run(kb, "krillion admin ban", Fake(ADMIN, name="admin"), member(2, "bob"))
+    run(kb, "krillion admin unban", mod, member(2, "bob"))
+    assert mod.sent[-1][2] is True
+    assert kb.service.storage.is_banned(1, 2)

@@ -54,6 +54,9 @@ def test_bans_reject_results(service):
     assert s.ban(GUILD, 2, banned_by=99, reason="cheating", at=DURING_58)
     assert not s.ban(GUILD, 2, banned_by=99, reason=None, at=DURING_58)
     assert s.is_banned(GUILD, 2) and not s.is_banned(GUILD, 1)
+    assert s.unban(GUILD, 2)
+    assert not s.unban(GUILD, 2)
+    assert not s.is_banned(GUILD, 2)
 
 
 def test_delegated_admins(service):

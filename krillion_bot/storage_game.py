@@ -119,6 +119,12 @@ class GameStorageMixin:
         )
         return cur.rowcount == 1
 
+    def unban(self, guild_id: int, user_id: int) -> bool:
+        cur = self._conn.execute(
+            "DELETE FROM bans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        return cur.rowcount == 1
+
     def is_banned(self, guild_id: int, user_id: int) -> bool:
         row = self._conn.execute(
             "SELECT 1 FROM bans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
