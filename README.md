@@ -103,8 +103,8 @@ SQLite on disk, ~60 MB RAM, no other services.
   point values sum to the posted score.
 
 - **Admins** are the Discord user IDs in `ADMIN_USER_IDS` (default:
-  `750888871696269402`), plus delegated admins and members with the *Manage
-  Server* permission.
+  `750888871696269402`), plus delegated admins. Server permissions such as *Manage
+  Server* grant nothing.
 
 ## 1. Create the Discord application
 
