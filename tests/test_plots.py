@@ -78,7 +78,7 @@ def test_stats_plot_krillion_labels_and_weekday_bars(monkeypatch):
     assert {
         "KRILLION ODDS",
         "1 in 7",
-        "3/21 rounds",
+        "3/21 questions",
         "3 KRILLIONS",
         "0 KRILLIONS",
         "NO DATA",

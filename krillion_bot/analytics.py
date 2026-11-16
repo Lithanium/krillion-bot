@@ -246,7 +246,7 @@ class Summary:
     best_performance: float | None
 
     @property
-    def rounds(self) -> int:
+    def questions(self) -> int:
         return self.games * ROUNDS_PER_DAY
 
     @property
@@ -255,7 +255,7 @@ class Summary:
 
     @property
     def krillion_odds(self) -> int | None:
-        return round(self.rounds / self.krillions) if self.krillions else None
+        return round(self.questions / self.krillions) if self.krillions else None
 
 
 def summarize(

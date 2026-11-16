@@ -177,7 +177,9 @@ def stats_plot(
         0.275,
         "KRILLION ODDS",
         f"1 in {summary.krillion_odds}" if summary.krillion_odds is not None else "—",
-        f"{summary.krillions}/{summary.rounds} rounds" if summary.krillions else "no krillions yet",
+        f"{summary.krillions}/{summary.questions} questions"
+        if summary.krillions
+        else "no krillions yet",
         _GREEN,
     )
     _kpi(fig, 0.51, "PERSONAL BEST", str(summary.best), f"median {summary.median:.0f}", _AMBER)
