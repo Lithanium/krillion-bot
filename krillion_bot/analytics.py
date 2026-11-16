@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from .models import RatingEntry, Result
-from .parser import MAX_DAY_SCORE, TIER_EMOJI
+from .parser import KRILLION_TIER, MAX_DAY_SCORE, ROUNDS_PER_DAY, TIER_EMOJI
 from .puzzle import PuzzleCalendar
 
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -238,11 +238,24 @@ class Summary:
     tier_counts: Counter[str]
     weekday_average: dict[int, float]
     """Mean score per ``date.weekday()`` for weekdays played."""
+    weekday_krillions: Counter[int]
     rating: float | None
     peak: float | None
     last_delta: float | None
     last_performance: float | None
     best_performance: float | None
+
+    @property
+    def rounds(self) -> int:
+        return self.games * ROUNDS_PER_DAY
+
+    @property
+    def krillions(self) -> int:
+        return self.tier_counts[KRILLION_TIER]
+
+    @property
+    def krillion_odds(self) -> int | None:
+        return round(self.rounds / self.krillions) if self.krillions else None
 
 
 def summarize(
@@ -268,8 +281,11 @@ def summarize(
             else:
                 wins += 1
     weekday: dict[int, list[int]] = {}
+    weekday_krillions: Counter[int] = Counter()
     for r in results:
-        weekday.setdefault(calendar.date_for(r.puzzle_number).weekday(), []).append(r.score)
+        day = calendar.date_for(r.puzzle_number).weekday()
+        weekday.setdefault(day, []).append(r.score)
+        weekday_krillions[day] += r.tiers.count(KRILLION_TIER)
     tiers: Counter[str] = Counter()
     for r in results:
         tiers.update(ch for ch in r.tiers if ch in TIER_EMOJI)
@@ -287,6 +303,7 @@ def summarize(
         perfect_streak=streaks(perfect_puzzles(results), current_puzzle),
         tier_counts=tiers,
         weekday_average={d: statistics.fmean(v) for d, v in sorted(weekday.items())},
+        weekday_krillions=weekday_krillions,
         rating=history[-1].rating_after if history else None,
         peak=max(e.rating_after for e in history) if history else None,
         last_delta=history[-1].delta if history else None,

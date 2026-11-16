@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 
 from krillion_bot import analytics as a
 from krillion_bot.models import RatingEntry, Result
+from krillion_bot.parser import KRILLION_TIER, ROUNDS_PER_DAY
 from krillion_bot.puzzle import PuzzleCalendar
 
 CAL = PuzzleCalendar()
@@ -140,6 +141,35 @@ def test_summarize_wins_use_whole_field():
 def test_summarize_unrated_player():
     s = a.summarize(9, [], [], CAL, current_puzzle=58)
     assert s.games == 0 and s.best is None and s.rating is None and s.streak == a.Streaks(0, 0)
+    assert s.rounds == s.krillions == 0
+    assert s.krillion_odds is None
+    assert not s.weekday_krillions
+
+
+def test_summarize_krillions_across_runs_and_weekdays():
+    rows = [
+        res(1, 54, 220, KRILLION_TIER + "🐟" * 4 + "⬛" * 2),
+        res(1, 61, 340, KRILLION_TIER * 2 + "🐟" * 4 + "⬛"),
+        res(1, 55, 210, "🐟" * ROUNDS_PER_DAY),
+        res(2, 54, 700, KRILLION_TIER * ROUNDS_PER_DAY),
+    ]
+    s = a.summarize(1, rows, [], CAL, current_puzzle=61)
+    assert (s.rounds, s.krillions, s.krillion_odds) == (21, 3, 7)
+    assert s.weekday_krillions == {0: 3, 1: 0}
+    assert s.weekday_average == {0: 280, 1: 210}
+
+
+def test_summarize_krillion_odds_round_to_whole_number():
+    rows = [res(1, 54, 460, KRILLION_TIER * 4 + "🐟" * 2 + "⬛")]
+    assert a.summarize(1, rows, [], CAL, 54).krillion_odds == 2
+
+
+def test_summarize_without_krillions():
+    rows = [res(1, 54, 210, "🐟" * ROUNDS_PER_DAY)]
+    s = a.summarize(1, rows, [], CAL, 54)
+    assert s.rounds == ROUNDS_PER_DAY
+    assert s.krillions == 0 and s.krillion_odds is None
+    assert s.weekday_krillions == {0: 0}
 
 
 # -- weekly recap -------------------------------------------------------------
