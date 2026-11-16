@@ -16,7 +16,8 @@ from dataclasses import dataclass
 ROUNDS_PER_DAY = 7
 MAX_DAY_SCORE = 700
 
-TIER_SCORES = {"🌟": 100, "🏮": 85, "🦑": 60, "🐟": 30, "🤡": 15, "🫧": 10, "⬛": 0}
+KRILLION_TIER = "🌟"
+TIER_SCORES = {KRILLION_TIER: 100, "🏮": 85, "🦑": 60, "🐟": 30, "🤡": 15, "🫧": 10, "⬛": 0}
 TIER_EMOJI = frozenset(TIER_SCORES)
 
 _HEADER_RE = re.compile(r"krillion\s*#\s*(\d{1,5})\b", re.IGNORECASE)

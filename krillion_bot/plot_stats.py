@@ -121,35 +121,29 @@ def _trend(fig, rows: Sequence[Result], calendar: PuzzleCalendar) -> None:
         text.set_color(_MUTED)
 
 
-def _weekday_dna(fig, rows: Sequence[Result], calendar: PuzzleCalendar) -> None:
+def _weekday_dna(fig, summary: Summary) -> None:
     ax = _panel(fig, (0.66, 0.09, 0.30, 0.375))
-    counts = [0] * 7
-    perfects = [0] * 7
-    scores: list[list[int]] = [[] for _ in range(7)]
-    for row in rows:
-        weekday = calendar.date_for(row.puzzle_number).weekday()
-        counts[weekday] += 1
-        perfects[weekday] += row.score == MAX_DAY_SCORE
-        scores[weekday].append(row.score)
-    rates = [100 * p / n if n else 0 for p, n in zip(perfects, counts, strict=True)]
+    krillions = [summary.weekday_krillions[day] for day in range(len(WEEKDAYS))]
+    peak = max(krillions, default=0) or 1
     strengths = [
-        max(0.025, rate / 100) if count else 0 for rate, count in zip(rates, counts, strict=True)
+        max(0.025, count / peak) if day in summary.weekday_average else 0
+        for day, count in enumerate(krillions)
     ]
-    colors = [_GREEN if rate >= 80 else _BLUE if rate >= 50 else _AMBER for rate in rates]
-    bars = ax.barh(range(7), strengths, color=colors, height=0.57)
-    ax.set_yticks(range(7), WEEKDAYS)
+    bars = ax.barh(range(len(WEEKDAYS)), strengths, color=_GREEN, height=0.57)
+    ax.set_yticks(range(len(WEEKDAYS)), WEEKDAYS)
     ax.invert_yaxis()
     ax.set_xlim(0, 1.43)
     ax.set_xticks([])
     ax.tick_params(length=0, colors=_TEXT, labelsize=8)
-    for bar, count, perfect, values in zip(bars, counts, perfects, scores, strict=True):
+    for day, (bar, count) in enumerate(zip(bars, krillions, strict=True)):
         y = bar.get_y() + bar.get_height() / 2
-        label = f"{perfect}/{count} PERFECT" if count else "NO DATA"
-        avg = f"AVG {statistics.fmean(values):.0f}" if values else "NO SCORE"
+        average = summary.weekday_average.get(day)
+        label = f"{count} KRILLIONS" if average is not None else "NO DATA"
+        avg = f"AVG {average:.0f}" if average is not None else "NO SCORE"
         ax.text(0.04, y, label, va="center", color=_TEXT, fontsize=7, weight="bold")
         ax.text(1.40, y, avg, va="center", ha="right", color=_TEXT, fontsize=7)
     ax.set_title(
-        "DAY DNA  ·  PERFECT RATE + SCORE", color=_TEXT, fontsize=10, weight="bold", loc="left"
+        "DAY DNA  ·  KRILLIONS + AVG SCORE", color=_TEXT, fontsize=10, weight="bold", loc="left"
     )
 
 
@@ -178,13 +172,14 @@ def stats_plot(
     )
     first = calendar.date_for(rows[0].puzzle_number)
     _kpi(fig, 0.04, "RUNS LOGGED", str(summary.games), f"since {first:%b %d, %Y}", _BLUE)
-    rate = 100 * summary.perfect_days / summary.games
     _kpi(
         fig,
         0.275,
-        "PERFECT RATE",
-        f"{rate:.0f}%",
-        f"{summary.perfect_days}/{summary.games} perfect results",
+        "KRILLION ODDS",
+        f"1 in {summary.krillion_odds}" if summary.krillion_odds is not None else "—",
+        f"{summary.krillions}/{summary.questions} questions"
+        if summary.krillions
+        else "no krillions yet",
         _GREEN,
     )
     _kpi(fig, 0.51, "PERSONAL BEST", str(summary.best), f"median {summary.median:.0f}", _AMBER)
@@ -208,7 +203,7 @@ def stats_plot(
     fig.text(0.04, 0.695, summary_text, color=_TEXT, fontsize=9, weight="bold")
     _strip(fig, scores, week, today)
     _trend(fig, rows, calendar)
-    _weekday_dna(fig, rows, calendar)
+    _weekday_dna(fig, summary)
     footer = fig.add_axes((0.04, 0.02, 0.92, 0.035), facecolor=_BG)
     footer.axis("off")
     footer.text(

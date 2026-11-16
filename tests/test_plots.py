@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 
 from PIL import Image
 
+from krillion_bot import plot_stats
 from krillion_bot.analytics import build_week_recap, summarize
 from krillion_bot.models import RatingEntry, Result
 from krillion_bot.plot_stats import stats_plot
@@ -62,3 +63,34 @@ def test_week_plot_renders_with_viewer_and_unknown_user_label():
     )
     assert png_image(week_plot(recap, {1: "alice", 2: "bob"}, {1: 1210, 2: 1190}, viewer=1))
     assert png_image(week_plot(recap, {}, {}, viewer=99))
+
+
+def test_stats_plot_krillion_labels_and_weekday_bars(monkeypatch):
+    rows = [
+        Result(1, 54, 1, 220, "🌟🐟🐟🐟🐟⬛⬛", 10, None, NOW),
+        Result(1, 61, 1, 340, "🌟🌟🐟🐟🐟🐟⬛", 10, None, NOW),
+        Result(1, 55, 1, 210, "🐟" * 7, 10, None, NOW),
+    ]
+    monkeypatch.setattr(plot_stats, "png", lambda fig: fig)
+    summary = summarize(1, rows, [], CALENDAR, 61)
+    fig = stats_plot("alice", summary, rows, CALENDAR, date(2026, 9, 14))
+    texts = [text.get_text() for ax in fig.axes for text in ax.texts]
+    assert {
+        "KRILLION ODDS",
+        "1 in 7",
+        "3/21 questions",
+        "3 KRILLIONS",
+        "0 KRILLIONS",
+        "NO DATA",
+        "AVG 280",
+    } <= set(texts)
+    dna = next(ax for ax in fig.axes if ax.get_title(loc="left").startswith("DAY DNA"))
+    assert dna.get_title(loc="left") == "DAY DNA  ·  KRILLIONS + AVG SCORE"
+    assert dna.patches[0].get_width() == 1
+    assert dna.patches[2].get_width() == 0
+
+    rows = rows[2:]
+    summary = summarize(1, rows, [], CALENDAR, 61)
+    fig = stats_plot("alice", summary, rows, CALENDAR, date(2026, 9, 14))
+    texts = [text.get_text() for ax in fig.axes for text in ax.texts]
+    assert {"—", "no krillions yet", "0 KRILLIONS"} <= set(texts)
