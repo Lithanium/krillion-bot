@@ -289,6 +289,13 @@ def test_admin_rating_override_invalid(kb):
     assert a.sent[-1][2] is True and "Rating must be between" in a.text
 
 
+def test_rating_displays_override_immediately(seeded):
+    seeded.service.set_rating_override(1, 1, "alice", 1500, ADMIN, None, NOW)
+    i = Fake(1)
+    run(seeded, "krillion rating", i)
+    assert "1500" in next(field.value for field in i.embed.fields if field.name == "Rating")
+
+
 def test_manage_server_is_not_admin(kb):
     mod = Fake(5, name="mod")
 

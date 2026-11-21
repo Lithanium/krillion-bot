@@ -162,6 +162,7 @@ def register(bot: KrillionBot) -> app_commands.Group:
             storage.history_for_user(guild_id, target.id),
             calendar,
             calendar.current(bot.now()),
+            player=player,
         )
         await send_plot(
             interaction,
@@ -184,7 +185,14 @@ def register(bot: KrillionBot) -> app_commands.Group:
         if not history:
             await reply(interaction, alert(f"No Krillion rating for `{name}` yet."))
             return
-        summary = analytics.summarize(target.id, [], history, calendar, calendar.current(bot.now()))
+        summary = analytics.summarize(
+            target.id,
+            [],
+            history,
+            calendar,
+            calendar.current(bot.now()),
+            player=storage.get_player(guild_id, target.id),
+        )
         await interaction.response.defer()
         png = await asyncio.to_thread(
             rating_chart, name, history, calendar, performances=performance

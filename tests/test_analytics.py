@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from krillion_bot import analytics as a
-from krillion_bot.models import RatingEntry, Result
+from krillion_bot.models import Player, RatingEntry, Result
 from krillion_bot.parser import KRILLION_TIER, ROUNDS_PER_DAY
 from krillion_bot.puzzle import PuzzleCalendar
 
@@ -144,6 +144,15 @@ def test_summarize_unrated_player():
     assert s.questions == s.krillions == 0
     assert s.krillion_odds is None
     assert not s.weekday_krillions
+
+
+def test_summarize_uses_current_player_rating_without_changing_peak():
+    history = [entry(1, 56, 1200, 1250)]
+    player = Player(1, 1, "alice", 1500)
+    s = a.summarize(1, [], history, CAL, 58, player=player)
+    assert s.rating == 1500 and s.peak == 1250
+    assert a.summarize(1, [], history, CAL, 58).rating == 1250
+    assert a.summarize(1, [], [], CAL, 58, player=player).rating == 1500
 
 
 def test_summarize_krillions_across_runs_and_weekdays():
