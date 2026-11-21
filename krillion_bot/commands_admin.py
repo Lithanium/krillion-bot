@@ -36,7 +36,7 @@ def register(bot: KrillionBot, parent: app_commands.Group) -> None:
     @app_commands.describe(
         member="Whose rating to set", rating="New rating", reason="Why (optional)"
     )
-    @admin.command(description="[Admin] Override a diver's rating until their next rated day.")
+    @admin.command(description="[Admin] Set a diver's rating; later days are rated from it.")
     async def setrating(
         interaction: discord.Interaction,
         member: discord.Member,
