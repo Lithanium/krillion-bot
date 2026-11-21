@@ -342,6 +342,20 @@ def test_clear_rating_override_unknown_user(service):
     assert (change.old_rating, change.new_rating, change.replayed_days) == (1200, 1200, 0)
 
 
+def test_new_override_replaces_old_anchor_after_latest_day_becomes_empty(service):
+    submit(service, 1, "alice", share(58, 340))
+    service.finalize_due(RESET_59 + timedelta(minutes=10))
+    service.set_rating_override(GUILD, 1, "alice", 1500, 99, None, RESET_59)
+    assert service.invalidate(GUILD, 58, 1).replayed_days == 0
+    assert service.storage.finalized_puzzles(GUILD) == []
+    service.set_rating_override(GUILD, 1, "alice", 1600, 99, "newest", RESET_59)
+    overrides = service.storage.rating_overrides(GUILD, 1)
+    assert len(overrides) == 1
+    assert (overrides[0].after_puzzle, overrides[0].rating) == (58, 1600)
+    service.replay(GUILD)
+    assert service.storage.get_player(GUILD, 1).rating == 1600
+
+
 def test_rating_override_survives_manual_insert_and_migration(service):
     service.set_rating_override(GUILD, 1, "alice", 1500, 99, None, DURING_58)
     service.add_manual(

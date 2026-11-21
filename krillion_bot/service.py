@@ -274,6 +274,13 @@ class KrillionService:
             )
         player = self.storage.upsert_player(guild_id, user_id, display_name)
         anchor = max((n for n, _ in self.storage.finalized_puzzles(guild_id)), default=0)
+        anchor = max(
+            anchor,
+            max(
+                (o.after_puzzle for o in self.storage.rating_overrides(guild_id, user_id)),
+                default=0,
+            ),
+        )
         self.storage.add_rating_override(
             RatingOverride(guild_id, user_id, anchor, rating, set_by, reason, now)
         )
