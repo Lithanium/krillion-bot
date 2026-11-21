@@ -102,7 +102,7 @@ def test_all_subcommands_registered(kb):
         "streak", "skips", "vs", "week", "puzzle", "admin",
     }  # fmt: skip
     admin = {c.name for c in group.get_command("admin").commands}
-    assert admin == {"ban", "unban", "invalidate"}
+    assert admin == {"ban", "unban", "invalidate", "setrating", "clearrating"}
 
 
 def test_stats_and_streak(seeded):
@@ -261,6 +261,32 @@ def test_admin_unban(kb):
     run(kb, "krillion admin unban", a, member(2, "bob"))
     assert "Unbanned `bob`" in a.embed.description
     assert post(kb, 2, "bob", share(58, 700)).status.value == "accepted"
+
+
+def test_admin_rating_override(kb):
+    a = Fake(ADMIN, name="admin")
+    run(kb, "krillion admin setrating", a, member(2, "bob"), 1500, "correction")
+    assert a.text == "Set `bob`'s rating 1200 → 1500.\nReason: correction"
+    assert kb.service.storage.get_player(1, 2).rating == 1500
+    a = Fake(ADMIN, name="admin")
+    run(kb, "krillion admin clearrating", a, member(2, "bob"))
+    assert "1500 → 1200" in a.text and "0 closed day(s)" in a.text
+    assert kb.service.storage.rating_overrides(1, 2) == []
+
+
+@pytest.mark.parametrize("command, args", [("setrating", (1500,)), ("clearrating", ())])
+def test_rating_override_requires_admin(kb, command, args):
+    refused = Fake(2, name="mallory")
+    run(kb, f"krillion admin {command}", refused, member(2, "bob"), *args)
+    assert refused.sent[-1][2] is True
+    assert "Only Krillion admins" in refused.text
+    assert kb.service.storage.get_player(1, 2) is None
+
+
+def test_admin_rating_override_invalid(kb):
+    a = Fake(ADMIN, name="admin")
+    run(kb, "krillion admin setrating", a, member(2, "bob"), -1)
+    assert a.sent[-1][2] is True and "Rating must be between" in a.text
 
 
 def test_manage_server_is_not_admin(kb):

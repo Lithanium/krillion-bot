@@ -90,7 +90,7 @@ SQLite on disk, ~60 MB RAM, no other services.
   - `/krillion puzzle` – which puzzle is live and when it resets (in each
     user's local time)
 
-  Admin (`/krillion admin ban|unban|invalidate`) — for `ADMIN_USER_IDS` and delegated admins
+  Admin (`/krillion admin`) — for `ADMIN_USER_IDS` and delegated admins
   only; server permissions such as *Manage Server* grant nothing
   - `ban <member> [reason]` – banned divers'
     results are ignored (🚫 reaction), they are hidden from boards, and their
@@ -98,6 +98,9 @@ SQLite on disk, ~60 MB RAM, no other services.
   - `unban <member>` – lift a ban; their results count again
   - `invalidate <member> [puzzle|date] [reason]` – remove a result and replay
     ratings when a closed day is affected
+  - `setrating <member> <rating> [reason]` – set a rating from 0 to 8000 immediately;
+    overrides survive rating rebuilds and normal Elo continues from the new value
+  - `clearrating <member>` – remove all their overrides and replay guild ratings
 
   Shares are accepted only when they contain exactly seven tier emojis whose
   point values sum to the posted score.
@@ -216,7 +219,7 @@ krillion_bot/
   plot_week.py      weekly recap dashboard
   discord_util.py   embeds, pagination, attachments
   commands.py       /krillion public commands
-  commands_admin.py /krillion admin ban/unban/invalidate subgroup
+  commands_admin.py /krillion admin results, bans, and rating overrides
   bot.py            Discord glue (events, scheduler, weekly recap)
 deploy/          deploy.sh, setup-vm.sh, systemd unit
 tests/

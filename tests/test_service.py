@@ -7,7 +7,12 @@ from helpers import tiers_for
 from krillion_bot.formatting import DISPLAY_EMOJI, final_table, live_table, ratings_table
 from krillion_bot.puzzle import PuzzleCalendar
 from krillion_bot.rating import compute_round
-from krillion_bot.service import KrillionService, SubmitStatus
+from krillion_bot.service import (
+    MAX_OVERRIDE_RATING,
+    MIN_OVERRIDE_RATING,
+    KrillionService,
+    SubmitStatus,
+)
 from krillion_bot.storage import RATING_ENGINE, Storage
 
 AEST = ZoneInfo("Australia/Brisbane")
@@ -273,6 +278,104 @@ def test_guilds_are_isolated(service):
     )
     assert other.status is SubmitStatus.ACCEPTED
     assert service.storage.results_for(2, 58)[0].channel_id == 99
+
+
+def test_rating_override_immediate_replacement_and_empty_replay(service):
+    change = service.set_rating_override(GUILD, 1, "alice", 1500, 99, "fix", DURING_58)
+    assert (change.old_rating, change.new_rating, change.replayed_days) == (1200, 1500, 0)
+    assert service.storage.get_player(GUILD, 1).rating == 1500
+    service.set_rating_override(GUILD, 1, "Alice", 1600, 98, None, RESET_59)
+    overrides = service.storage.rating_overrides(GUILD, 1)
+    assert len(overrides) == 1
+    assert (overrides[0].after_puzzle, overrides[0].rating, overrides[0].set_by) == (0, 1600, 98)
+    assert overrides[0].created_at == RESET_59 and overrides[0].reason is None
+    assert service.replay(GUILD) == 0
+    assert service.storage.get_player(GUILD, 1).rating == 1600
+    assert service.storage.get_player(GUILD, 1).display_name == "Alice"
+    assert service.storage.rating_overrides(2, 1) == []
+    cleared = service.clear_rating_overrides(GUILD, 1)
+    assert (cleared.old_rating, cleared.new_rating, cleared.replayed_days) == (1600, 1200, 0)
+    assert service.storage.rating_overrides(GUILD, 1) == []
+
+
+@pytest.mark.parametrize(
+    "rating", [MIN_OVERRIDE_RATING - 1, MAX_OVERRIDE_RATING + 1, float("nan"), float("inf")]
+)
+def test_rating_override_rejects_invalid_rating(service, rating):
+    with pytest.raises(ValueError, match="Rating must be between"):
+        service.set_rating_override(GUILD, 1, "alice", rating, 99, None, DURING_58)
+    assert service.storage.get_player(GUILD, 1) is None
+
+
+def test_rating_override_survives_invalidation_and_elo_continues(service):
+    cal = service.calendar
+    submit(service, 1, "alice", share(58, 340))
+    submit(service, 2, "bob", share(58, 120))
+    service.finalize_due(RESET_59 + timedelta(minutes=10))
+    service.set_rating_override(GUILD, 1, "alice", 1500, 99, "fix", RESET_59)
+    assert service.storage.rating_overrides(GUILD, 1)[0].after_puzzle == 58
+    assert service.invalidate(GUILD, 58, 2).replayed_days == 1
+    assert service.storage.get_player(GUILD, 1).rating == 1500
+    now59 = cal.start(59) + timedelta(hours=1)
+    submit(service, 1, "alice", share(59, 200), now=now59)
+    submit(service, 2, "bob", share(59, 250), now=now59)
+    expected = service.rate_day(GUILD, 59, service.storage.results_for(GUILD, 59))
+    service.finalize_due(cal.end(59) + timedelta(minutes=10))
+    assert service.storage.get_player(GUILD, 1).rating == pytest.approx(1500 + expected.deltas[1])
+    assert service.replay(GUILD) == 2
+    alice = next(e for e in service.storage.history_for(GUILD, 59) if e.user_id == 1)
+    assert alice.rating_before == 1500
+    assert alice.rating_after == pytest.approx(1500 + expected.deltas[1])
+    service.set_rating_override(GUILD, 1, "alice", 1700, 99, None, now59)
+    assert len(service.storage.rating_overrides(GUILD, 1)) == 2
+    assert service.replay(GUILD) == 2
+    assert service.storage.get_player(GUILD, 1).rating == 1700
+    change = service.clear_rating_overrides(GUILD, 1)
+    assert change.replayed_days == 2 and change.old_rating == 1700
+    assert change.new_rating == pytest.approx(1200 + LOSE)
+    assert service.storage.rating_overrides(GUILD, 1) == []
+    assert service.storage.get_player(GUILD, 2).rating == pytest.approx(1200 + WIN)
+
+
+def test_clear_rating_override_unknown_user(service):
+    change = service.clear_rating_overrides(GUILD, 1)
+    assert (change.old_rating, change.new_rating, change.replayed_days) == (1200, 1200, 0)
+
+
+def test_rating_override_survives_manual_insert_and_migration(service):
+    service.set_rating_override(GUILD, 1, "alice", 1500, 99, None, DURING_58)
+    service.add_manual(
+        guild_id=GUILD,
+        user_id=1,
+        display_name="alice",
+        puzzle_number=58,
+        score=340,
+        tiers=tiers_for(340),
+        channel_id=CHANNEL,
+        now=RESET_59 + timedelta(hours=1),
+    )
+    assert service.storage.history_for(GUILD, 58)[0].rating_before == 1500
+    assert service.migrate_ratings() == 1
+    assert service.storage.get_player(GUILD, 1).rating == 1500
+
+
+def test_rating_override_storage_persists_and_deletes_per_user(tmp_path):
+    path = tmp_path / "overrides.sqlite"
+    storage = Storage(path)
+    service = KrillionService(storage)
+    service.set_rating_override(GUILD, 1, "alice", 1500, 99, "fix", DURING_58)
+    service.set_rating_override(GUILD, 2, "bob", 1600, 99, None, DURING_58)
+    service.set_rating_override(2, 1, "alice", 1700, 99, None, DURING_58)
+    storage.close()
+    storage = Storage(path)
+    overrides = storage.rating_overrides(GUILD, 1)
+    assert len(overrides) == 1 and overrides[0].reason == "fix"
+    assert overrides[0].created_at == DURING_58
+    assert storage.delete_rating_overrides(GUILD, 1) == 1
+    assert storage.delete_rating_overrides(GUILD, 1) == 0
+    assert len(storage.rating_overrides(GUILD)) == 1
+    assert len(storage.rating_overrides(2, 1)) == 1
+    storage.close()
 
 
 def test_formatting(service):

@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import Player, PlayerStats, RatingEntry, Result
+from .models import Player, PlayerStats, RatingEntry, RatingOverride, Result
 from .rating import STARTING_RATING
 from .storage_game import GameStorageMixin
 
@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS rating_history (
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rating_overrides (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    after_puzzle INTEGER NOT NULL,
+    rating REAL NOT NULL,
+    set_by INTEGER NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, user_id, after_puzzle)
 );
 
 CREATE TABLE IF NOT EXISTS bans (
@@ -168,6 +179,45 @@ class Storage(GameStorageMixin):
             "UPDATE players SET rating = ? WHERE guild_id = ? AND user_id = ?",
             (rating, guild_id, user_id),
         )
+
+    def add_rating_override(self, override: RatingOverride) -> None:
+        self._conn.execute(
+            "INSERT INTO rating_overrides "
+            "(guild_id, user_id, after_puzzle, rating, set_by, reason, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id, after_puzzle) DO UPDATE SET "
+            "rating = excluded.rating, set_by = excluded.set_by, "
+            "reason = excluded.reason, created_at = excluded.created_at",
+            (
+                override.guild_id,
+                override.user_id,
+                override.after_puzzle,
+                override.rating,
+                override.set_by,
+                override.reason,
+                _iso(override.created_at),
+            ),
+        )
+
+    def rating_overrides(self, guild_id: int, user_id: int | None = None) -> list[RatingOverride]:
+        where = "guild_id = ?"
+        params = (guild_id,)
+        if user_id is not None:
+            where += " AND user_id = ?"
+            params += (user_id,)
+        rows = self._conn.execute(
+            f"SELECT * FROM rating_overrides WHERE {where} ORDER BY after_puzzle, user_id",
+            params,
+        ).fetchall()
+        return [
+            RatingOverride(**{**dict(r), "created_at": _from_iso(r["created_at"])}) for r in rows
+        ]
+
+    def delete_rating_overrides(self, guild_id: int, user_id: int) -> int:
+        return self._conn.execute(
+            "DELETE FROM rating_overrides WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        ).rowcount
 
     # -- results ---------------------------------------------------------
 
