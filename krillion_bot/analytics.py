@@ -15,7 +15,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from .models import RatingEntry, Result
+from .models import Player, RatingEntry, Result
 from .parser import KRILLION_TIER, MAX_DAY_SCORE, ROUNDS_PER_DAY, TIER_EMOJI
 from .puzzle import PuzzleCalendar
 
@@ -264,6 +264,8 @@ def summarize(
     history: Sequence[RatingEntry],
     calendar: PuzzleCalendar,
     current_puzzle: int,
+    *,
+    player: Player | None = None,
 ) -> Summary:
     """Everything ``/krillion stats`` shows for ``user_id``.
 
@@ -304,7 +306,11 @@ def summarize(
         tier_counts=tiers,
         weekday_average={d: statistics.fmean(v) for d, v in sorted(weekday.items())},
         weekday_krillions=weekday_krillions,
-        rating=history[-1].rating_after if history else None,
+        rating=player.rating
+        if player is not None
+        else history[-1].rating_after
+        if history
+        else None,
         peak=max(e.rating_after for e in history) if history else None,
         last_delta=history[-1].delta if history else None,
         last_performance=perfs[-1] if perfs else None,

@@ -27,6 +27,17 @@ class Player:
 
 
 @dataclass(frozen=True)
+class RatingOverride:
+    guild_id: int
+    user_id: int
+    after_puzzle: int
+    rating: float
+    set_by: int
+    reason: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class RatingEntry:
     puzzle_number: int
     user_id: int

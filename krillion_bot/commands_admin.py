@@ -9,6 +9,7 @@ from discord import app_commands
 
 from .commands import PUZZLE_DESCRIBE
 from .discord_util import alert, guild_of, ok, reply, resolve_puzzle
+from .service import MAX_OVERRIDE_RATING, MIN_OVERRIDE_RATING
 
 if TYPE_CHECKING:
     from .bot import KrillionBot
@@ -19,7 +20,7 @@ def register(bot: KrillionBot, parent: app_commands.Group) -> None:
     storage = service.storage
     calendar = service.calendar
     admin = app_commands.Group(
-        name="admin", description="[Admin] Ban, unban, or invalidate diver results.", parent=parent
+        name="admin", description="[Admin] Manage diver results, bans, and ratings.", parent=parent
     )
 
     async def gate(interaction: discord.Interaction) -> int | None:
@@ -31,6 +32,56 @@ def register(bot: KrillionBot, parent: app_commands.Group) -> None:
         return guild_id
 
     # -- people ----------------------------------------------------------
+
+    @app_commands.describe(
+        member="Whose rating to set", rating="New rating", reason="Why (optional)"
+    )
+    @admin.command(description="[Admin] Set a diver's rating; later days are rated from it.")
+    async def setrating(
+        interaction: discord.Interaction,
+        member: discord.Member,
+        rating: app_commands.Range[float, MIN_OVERRIDE_RATING, MAX_OVERRIDE_RATING],
+        reason: str | None = None,
+    ) -> None:
+        guild_id = await gate(interaction)
+        if guild_id is None:
+            return
+        try:
+            change = service.set_rating_override(
+                guild_id,
+                member.id,
+                member.display_name,
+                rating,
+                interaction.user.id,
+                reason,
+                bot.now(),
+            )
+        except ValueError as error:
+            await reply(interaction, alert(str(error)), ephemeral=True)
+            return
+        text = (
+            f"Set `{member.display_name}`'s rating "
+            f"{change.old_rating:.0f} → {change.new_rating:.0f}."
+        )
+        if reason:
+            text += f"\nReason: {reason}"
+        await reply(interaction, ok(text))
+
+    @app_commands.describe(member="Whose rating overrides to clear")
+    @admin.command(description="[Admin] Clear a diver's overrides and recompute ratings.")
+    async def clearrating(interaction: discord.Interaction, member: discord.Member) -> None:
+        guild_id = await gate(interaction)
+        if guild_id is None:
+            return
+        change = service.clear_rating_overrides(guild_id, member.id)
+        await reply(
+            interaction,
+            ok(
+                f"Cleared `{member.display_name}`'s rating overrides: "
+                f"{change.old_rating:.0f} → {change.new_rating:.0f}.\n"
+                f"Ratings replayed across {change.replayed_days} closed day(s)."
+            ),
+        )
 
     @app_commands.describe(member="Who to ban", reason="Why (optional)")
     @admin.command(description="[Admin] Block a diver's results and hide them.")
