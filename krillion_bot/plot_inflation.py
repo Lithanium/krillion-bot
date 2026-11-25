@@ -110,8 +110,10 @@ def inflation_plot(cutoffs: dict[Rank, dict[int, int]], calendar: PuzzleCalendar
 
     for rank in ranks:
         color = hex_color(rank.color)
-        ax.plot(xs, series[rank], color=color, linewidth=2, zorder=3)
-        ax.scatter(xs, series[rank], color=color, s=MARKER_SIZE, zorder=4)
+        values = np.asarray(series[rank])
+        observed = np.isfinite(values)
+        ax.plot(xs[observed], values[observed], color=color, linewidth=2, zorder=3)
+        ax.scatter(xs[observed], values[observed], color=color, s=MARKER_SIZE, zorder=4)
 
     ax.set_ylim(0, MAX_DAY_SCORE)
     ax.set_yticks(range(0, MAX_DAY_SCORE + 1, 100))
