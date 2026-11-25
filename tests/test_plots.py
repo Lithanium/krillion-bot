@@ -1,6 +1,7 @@
 import io
 from datetime import date, datetime, timezone
 
+import numpy as np
 from PIL import Image
 
 from krillion_bot import plot_stats
@@ -94,3 +95,52 @@ def test_stats_plot_krillion_labels_and_weekday_bars(monkeypatch):
     fig = stats_plot("alice", summary, rows, CALENDAR, date(2026, 9, 14))
     texts = [text.get_text() for ax in fig.axes for text in ax.texts]
     assert {"—", "no krillions yet", "0 KRILLIONS"} <= set(texts)
+
+
+def test_inflation_plot_renders_and_interpolates_gaps():
+    from krillion_bot.analytics import rank_cutoffs
+    from krillion_bot.plot_inflation import inflation_plot, interpolate
+
+    entries = [
+        RatingEntry(4, 1, 700, 1, 1200, 1210, 1650),
+        RatingEntry(4, 2, 400, 2, 1200, 1190, 1300),
+        RatingEntry(5, 1, 550, 1, 1210, 1220, 1500),
+        RatingEntry(5, 2, 350, 2, 1190, 1180, 1250),
+        RatingEntry(6, 1, 480, 1, 1220, 1230, 1400),
+        RatingEntry(6, 2, 420, 2, 1180, 1170, 1350),
+    ]
+    cutoffs = rank_cutoffs(entries)
+    assert png_image(inflation_plot(cutoffs, CALENDAR))
+
+    nan = float("nan")
+    filled = interpolate(np.array([0.0, 1.0, 2.0, 3.0, 4.0]), [1.0, nan, nan, 4.0, nan])
+    assert list(filled)[:4] == [1.0, 2.0, 3.0, 4.0]
+    assert np.isnan(filled[4])  # trailing nan stays empty
+    uneven = interpolate(np.array([0.0, 1.0, 4.0]), [0.0, nan, 400.0])
+    assert uneven[1] == 100.0  # placed by date, not by index
+
+    assert inflation_plot({}, CALENDAR) is None
+
+
+def test_ao_smooth_drops_extremes_and_keeps_short_edges():
+    from krillion_bot.plot_inflation import ao_smooth
+
+    assert ao_smooth([10.0, 50.0, 20.0, 30.0, 40.0], 3) == [10.0, 20.0, 30.0, 30.0, 40.0]
+    # ao5 boundary: window of exactly 3 still drops the high and low
+    assert ao_smooth([10.0, 20.0, 50.0], 5)[0] == 20.0
+    # fewer than three observations in reach: raw value survives
+    assert ao_smooth([10.0, 99.0], 3) == [10.0, 99.0]
+
+
+def test_inflation_plot_renders_smoothed_and_shades_below_lowest_line():
+    from krillion_bot.analytics import rank_cutoffs
+    from krillion_bot.plot_inflation import inflation_plot
+
+    entries = []
+    for n in range(4, 12):
+        entries += [
+            RatingEntry(n, 1, 600 + (n % 3) * 30, 1, 1200, 1210, 1600),
+            RatingEntry(n, 2, 400 + (n % 2) * 40, 2, 1200, 1190, 1300),
+        ]
+    data = inflation_plot(rank_cutoffs(entries), CALENDAR, ao=3)
+    assert png_image(data)

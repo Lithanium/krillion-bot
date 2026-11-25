@@ -71,6 +71,12 @@ SQLite on disk, ~60 MB RAM, no other services.
     including shared days)
   - `/krillion week [when]` – weekly recap for this week, `last`, or the week
     holding a date
+  - `/krillion inflation [ao]` – the lowest score each day that earned each
+    rank's performance, one line per rank over time, with the band above each
+    line shaded in that rank's colour and the zone below the lowest line in
+    Newbie grey (days where nobody reached a rank are skipped). `ao` smooths
+    each line cubing-style: centred windows of that many days (odd, 3+) drop
+    their highest and lowest before averaging
 
   Divers
   - `/krillion stats [member]` – rating, peak, performance, games, wins, best /
@@ -217,6 +223,7 @@ krillion_bot/
   charts.py         matplotlib theme, rank colours, rating / performance graph
   plot_stats.py     /krillion stats dashboard
   plot_week.py      weekly recap dashboard
+  plot_inflation.py /krillion inflation rank-cutoff chart
   discord_util.py   embeds, pagination, attachments
   commands.py       /krillion public commands
   commands_admin.py /krillion admin results, bans, and rating overrides
