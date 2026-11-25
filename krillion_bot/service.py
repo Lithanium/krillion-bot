@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from math import isfinite
 
+from .models import RatingOverride
 from .parser import ParsedResult, parse_result
 from .puzzle import PuzzleCalendar
 from .rating import (
@@ -13,6 +15,7 @@ from .rating import (
     DECAY_BASE,
     DECAY_GRACE,
     DECAY_MAX,
+    STARTING_RATING,
     DayOutcome,
     close_day,
     placements,
@@ -65,6 +68,16 @@ class Deletion:
 
 MAX_INACTIVE_DAYS = 30
 """Divers who haven't played this many puzzles drop off the ratings board."""
+
+MIN_OVERRIDE_RATING = 0
+MAX_OVERRIDE_RATING = 8000
+
+
+@dataclass(frozen=True)
+class RatingChange:
+    old_rating: float
+    new_rating: float
+    replayed_days: int = 0
 
 
 class KrillionService:
@@ -245,6 +258,43 @@ class KrillionService:
 
     # -- admin -----------------------------------------------------------
 
+    def set_rating_override(
+        self,
+        guild_id: int,
+        user_id: int,
+        display_name: str,
+        rating: float,
+        set_by: int,
+        reason: str | None,
+        now: datetime,
+    ) -> RatingChange:
+        if not isfinite(rating) or not MIN_OVERRIDE_RATING <= rating <= MAX_OVERRIDE_RATING:
+            raise ValueError(
+                f"Rating must be between {MIN_OVERRIDE_RATING} and {MAX_OVERRIDE_RATING}."
+            )
+        player = self.storage.upsert_player(guild_id, user_id, display_name)
+        anchor = max((n for n, _ in self.storage.finalized_puzzles(guild_id)), default=0)
+        anchor = max(
+            anchor,
+            max(
+                (o.after_puzzle for o in self.storage.rating_overrides(guild_id, user_id)),
+                default=0,
+            ),
+        )
+        self.storage.add_rating_override(
+            RatingOverride(guild_id, user_id, anchor, rating, set_by, reason, now)
+        )
+        self.storage.set_rating(guild_id, user_id, rating)
+        return RatingChange(player.rating, rating)
+
+    def clear_rating_overrides(self, guild_id: int, user_id: int) -> RatingChange:
+        player = self.storage.get_player(guild_id, user_id)
+        old_rating = player.rating if player else STARTING_RATING
+        self.storage.delete_rating_overrides(guild_id, user_id)
+        replayed = self.replay(guild_id)
+        player = self.storage.get_player(guild_id, user_id)
+        return RatingChange(old_rating, player.rating if player else STARTING_RATING, replayed)
+
     def invalidate(self, guild_id: int, puzzle_number: int, user_id: int) -> Invalidation | None:
         """Drop a user's result. If that day was already closed, replay ratings from scratch."""
         removed = self.storage.remove_result(guild_id, puzzle_number, user_id)
@@ -355,7 +405,18 @@ class KrillionService:
                 if g == guild_id and n not in days and not self.is_open(n, now):
                     days[n] = now
         self.storage.reset_ratings(guild_id)
-        return sum(self.finalize(guild_id, n, days[n]) is not None for n in sorted(days))
+        overrides = iter(self.storage.rating_overrides(guild_id))
+        pending = next(overrides, None)
+        replayed = 0
+        for n in sorted(days):
+            while pending is not None and pending.after_puzzle < n:
+                self.storage.set_rating(guild_id, pending.user_id, pending.rating)
+                pending = next(overrides, None)
+            replayed += self.finalize(guild_id, n, days[n]) is not None
+        while pending is not None:
+            self.storage.set_rating(guild_id, pending.user_id, pending.rating)
+            pending = next(overrides, None)
+        return replayed
 
     def finalize_due(self, now: datetime) -> list[FinalizedDay]:
         done: list[FinalizedDay] = []
