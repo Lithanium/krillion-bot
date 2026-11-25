@@ -228,3 +228,22 @@ def test_week_recap():
 def test_week_recap_finished_week():
     recap = a.build_week_recap([], [], CAL, date(2026, 9, 1), today=date(2026, 9, 12))
     assert not recap.in_progress and recap.results == 0 and recap.standings == []
+
+
+def test_rank_cutoffs_min_score_skips_solo_and_missing():
+    from krillion_bot.analytics import rank_cutoffs
+    from krillion_bot.rating import rank_for_rating
+
+    entries = [
+        RatingEntry(4, 1, 700, 1, 1200, 1210, 1650),
+        RatingEntry(4, 2, 400, 2, 1200, 1190, 1300),
+        RatingEntry(5, 1, 500, 1, 1210, 1220, None),  # solo day: never counts
+    ]
+    cutoffs = rank_cutoffs(entries)
+    gm = rank_for_rating(1650)
+    cm = rank_for_rating(1350)
+    assert cutoffs[gm] == {4: 700}
+    assert cutoffs[cm] == {4: 400}
+    pupil = rank_for_rating(1050)
+    assert cutoffs[pupil] == {4: 400}
+    assert all(5 not in series for series in cutoffs.values())

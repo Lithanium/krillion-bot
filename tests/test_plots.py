@@ -94,3 +94,25 @@ def test_stats_plot_krillion_labels_and_weekday_bars(monkeypatch):
     fig = stats_plot("alice", summary, rows, CALENDAR, date(2026, 9, 14))
     texts = [text.get_text() for ax in fig.axes for text in ax.texts]
     assert {"—", "no krillions yet", "0 KRILLIONS"} <= set(texts)
+
+
+def test_inflation_plot_renders_and_interpolates_gaps():
+    from krillion_bot.analytics import rank_cutoffs
+    from krillion_bot.plot_inflation import inflation_plot, interpolate
+
+    entries = [
+        RatingEntry(4, 1, 700, 1, 1200, 1210, 1650),
+        RatingEntry(4, 2, 400, 2, 1200, 1190, 1300),
+        RatingEntry(5, 1, 550, 1, 1210, 1220, 1500),
+        RatingEntry(5, 2, 350, 2, 1190, 1180, 1250),
+        RatingEntry(6, 1, 480, 1, 1220, 1230, 1400),
+        RatingEntry(6, 2, 420, 2, 1180, 1170, 1350),
+    ]
+    cutoffs = rank_cutoffs(entries)
+    assert png_image(inflation_plot(cutoffs, CALENDAR))
+
+    filled = interpolate([1.0, float("nan"), float("nan"), 4.0, float("nan")])
+    assert list(filled)[:4] == [1.0, 2.0, 3.0, 4.0]
+    assert filled[4] != filled[4]  # trailing nan stays empty
+
+    assert inflation_plot({}, CALENDAR) is None

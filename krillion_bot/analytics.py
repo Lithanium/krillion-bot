@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from .models import Player, RatingEntry, Result
 from .parser import KRILLION_TIER, MAX_DAY_SCORE, ROUNDS_PER_DAY, TIER_EMOJI
 from .puzzle import PuzzleCalendar
+from .rating import RANKS, Rank
 
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -68,6 +69,30 @@ def skipped_puzzles(puzzles: Iterable[int], current_puzzle: int) -> tuple[int | 
     first = min(played)
     skipped = [n for n in range(current_puzzle - 1, first, -1) if n not in played]
     return first, skipped
+
+
+# -- performance cutoffs -----------------------------------------------------
+
+
+def rank_cutoffs(entries: Iterable[RatingEntry]) -> dict[Rank, dict[int, int]]:
+    """Lowest score per puzzle reaching each rank's performance floor.
+
+    ``{rank: {puzzle: score}}`` for every rank above the bottom band. Puzzles
+    where no score reached the floor are simply absent (never zero), and solo
+    days — ``performance is None`` — never contribute.
+    """
+    by_day: dict[int, list[RatingEntry]] = {}
+    for entry in entries:
+        by_day.setdefault(entry.puzzle_number, []).append(entry)
+    ranks = RANKS[1:]
+    cutoffs: dict[Rank, dict[int, int]] = {rank: {} for rank in ranks}
+    for puzzle_number, day in sorted(by_day.items()):
+        scored = [(e.score, e.performance) for e in day if e.performance is not None]
+        for rank in ranks:
+            lowest = min((s for s, p in scored if p >= rank.low), default=None)
+            if lowest is not None:
+                cutoffs[rank][puzzle_number] = lowest
+    return cutoffs
 
 
 # -- winners -----------------------------------------------------------------

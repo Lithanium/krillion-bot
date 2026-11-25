@@ -26,6 +26,7 @@ from .discord_util import (
     send_plot,
 )
 from .formatting import final_table, live_table, ratings_table
+from .plot_inflation import inflation_plot
 from .plot_stats import stats_plot
 from .service import MAX_INACTIVE_DAYS
 from .views import (
@@ -340,6 +341,18 @@ def register(bot: KrillionBot) -> app_commands.Group:
         )
 
     # -- participation ---------------------------------------------------
+
+    @group.command(description="Lowest daily score reaching each rank's performance, over time.")
+    async def inflation(interaction: discord.Interaction) -> None:
+        guild_id = guild_of(interaction)
+        entries = storage.history_between(guild_id, 1, calendar.current(bot.now()))
+        cutoffs = analytics.rank_cutoffs(entries)
+        if not any(cutoffs.values()):
+            await reply(
+                interaction, info("Not enough rated Krillion days for an inflation chart yet.")
+            )
+            return
+        await send_plot(interaction, "krillion-inflation.png", inflation_plot, cutoffs, calendar)
 
     @group.command(description="Which Krillion puzzle is live and when it resets.")
     async def puzzle(interaction: discord.Interaction) -> None:
