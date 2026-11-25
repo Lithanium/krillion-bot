@@ -1,6 +1,7 @@
 import io
 from datetime import date, datetime, timezone
 
+import numpy as np
 from PIL import Image
 
 from krillion_bot import plot_stats
@@ -111,8 +112,11 @@ def test_inflation_plot_renders_and_interpolates_gaps():
     cutoffs = rank_cutoffs(entries)
     assert png_image(inflation_plot(cutoffs, CALENDAR))
 
-    filled = interpolate([1.0, float("nan"), float("nan"), 4.0, float("nan")])
+    nan = float("nan")
+    filled = interpolate(np.array([0.0, 1.0, 2.0, 3.0, 4.0]), [1.0, nan, nan, 4.0, nan])
     assert list(filled)[:4] == [1.0, 2.0, 3.0, 4.0]
-    assert filled[4] != filled[4]  # trailing nan stays empty
+    assert np.isnan(filled[4])  # trailing nan stays empty
+    uneven = interpolate(np.array([0.0, 1.0, 4.0]), [0.0, nan, 400.0])
+    assert uneven[1] == 100.0  # placed by date, not by index
 
     assert inflation_plot({}, CALENDAR) is None

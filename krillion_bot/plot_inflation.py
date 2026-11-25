@@ -23,14 +23,16 @@ FILL_ALPHA = 0.35
 MARKER_SIZE = 12
 
 
-def interpolate(values: list[float]) -> np.ndarray:
-    """Series with ``nan`` gaps linearly interpolated; the outer ``nan`` runs stay empty."""
+def interpolate(xs: np.ndarray, values: list[float]) -> np.ndarray:
+    """``values`` at ``xs`` with ``nan`` gaps linearly interpolated along ``xs``.
+
+    The leading and trailing ``nan`` runs stay empty.
+    """
     y = np.asarray(values, dtype=float)
     valid = np.isfinite(y)
     if not valid.any():
         return y
-    positions = np.arange(len(y))
-    filled = np.interp(positions, positions[valid], y[valid]).astype(float)
+    filled = np.interp(xs, xs[valid], y[valid]).astype(float)
     first = int(np.argmax(valid))
     last = len(valid) - 1 - int(np.argmax(valid[::-1]))
     filled[:first] = np.nan
@@ -44,8 +46,8 @@ def _fill_between(ax, xs: np.ndarray, upper: list[float], lower: list[float], co
     Skipping days differ per rank, so each series is first interpolated over
     the shared date grid; the band is then drawn only where both have data.
     """
-    up = interpolate(upper)
-    down = interpolate(lower)
+    up = interpolate(xs, upper)
+    down = interpolate(xs, lower)
     both = np.isfinite(up) & np.isfinite(down)
     start: int | None = None
     segments: list[tuple[int, int]] = []
