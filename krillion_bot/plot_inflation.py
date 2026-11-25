@@ -46,8 +46,10 @@ def _fill_between(ax, xs: np.ndarray, upper: list[float], lower: list[float], co
     Skipping days differ per rank, so each series is first interpolated over
     the shared date grid; the band is then drawn only where both have data.
     """
-    up = interpolate(xs, upper)
     down = interpolate(xs, lower)
+    # An interpolated upper cutoff can dip under an observed lower one; the band
+    # never extends below the rank's own cutoff.
+    up = np.fmax(interpolate(xs, upper), down)
     both = np.isfinite(up) & np.isfinite(down)
     start: int | None = None
     segments: list[tuple[int, int]] = []
