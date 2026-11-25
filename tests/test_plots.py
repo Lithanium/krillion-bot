@@ -120,3 +120,27 @@ def test_inflation_plot_renders_and_interpolates_gaps():
     assert uneven[1] == 100.0  # placed by date, not by index
 
     assert inflation_plot({}, CALENDAR) is None
+
+
+def test_ao_smooth_drops_extremes_and_keeps_short_edges():
+    from krillion_bot.plot_inflation import ao_smooth
+
+    assert ao_smooth([10.0, 50.0, 20.0, 30.0, 40.0], 3) == [10.0, 20.0, 30.0, 30.0, 40.0]
+    # ao5 boundary: window of exactly 3 still drops the high and low
+    assert ao_smooth([10.0, 20.0, 50.0], 5)[0] == 20.0
+    # fewer than three observations in reach: raw value survives
+    assert ao_smooth([10.0, 99.0], 3) == [10.0, 99.0]
+
+
+def test_inflation_plot_renders_smoothed_and_shades_below_lowest_line():
+    from krillion_bot.analytics import rank_cutoffs
+    from krillion_bot.plot_inflation import inflation_plot
+
+    entries = []
+    for n in range(4, 12):
+        entries += [
+            RatingEntry(n, 1, 600 + (n % 3) * 30, 1, 1200, 1210, 1600),
+            RatingEntry(n, 2, 400 + (n % 2) * 40, 2, 1200, 1190, 1300),
+        ]
+    data = inflation_plot(rank_cutoffs(entries), CALENDAR, ao=3)
+    assert png_image(data)

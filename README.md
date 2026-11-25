@@ -71,9 +71,12 @@ SQLite on disk, ~60 MB RAM, no other services.
     including shared days)
   - `/krillion week [when]` – weekly recap for this week, `last`, or the week
     holding a date
-  - `/krillion inflation` – the lowest score each day that earned each rank's
-    performance, one line per rank over time, with the band above each line
-    shaded in that rank's colour (days where nobody reached a rank are skipped)
+  - `/krillion inflation [ao]` – the lowest score each day that earned each
+    rank's performance, one line per rank over time, with the band above each
+    line shaded in that rank's colour and the zone below the lowest line in
+    Newbie grey (days where nobody reached a rank are skipped). `ao` smooths
+    each line cubing-style: centred windows of that many days (odd, 3+) drop
+    their highest and lowest before averaging
 
   Divers
   - `/krillion stats [member]` – rating, peak, performance, games, wins, best /

@@ -4,7 +4,10 @@ Every rank above Newbie gets one line: the lowest score that reached that
 rank's performance floor on each puzzle. Puzzles with no qualifying score are
 skipped, and lines join straight across the gap. The band from a rank's line
 up to the next rank's line (the top rank: up to the maximum score) is shaded in
-the rank's colour — the scores that would have performed as that rank.
+the rank's colour — the scores that would have performed as that rank. The zone
+below the lowest line is Newbie grey. ``ao`` smooths every series cubing-style:
+each centred window of that many observations drops its highest and lowest
+before averaging.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from matplotlib.patches import Polygon
 from .charts import GREEN, GRID, MUTED, PANEL, figure, hex_color, png
 from .parser import MAX_DAY_SCORE
 from .puzzle import PuzzleCalendar
-from .rating import Rank
+from .rating import RANKS, Rank
 
 FILL_ALPHA = 0.35
 MARKER_SIZE = 12
@@ -38,6 +41,25 @@ def interpolate(xs: np.ndarray, values: list[float]) -> np.ndarray:
     filled[:first] = np.nan
     filled[last + 1 :] = np.nan
     return filled
+
+
+def ao_smooth(values: list[float], ao: int) -> list[float]:
+    """Each point replaced by its centred ``ao``-window average, high/low dropped.
+
+    Windows are shorter at the ends; a position reaching fewer than three
+    observations keeps its raw value, since dropping two outliers would leave
+    nothing.
+    """
+    half = ao // 2
+    out = []
+    for i in range(len(values)):
+        window = values[max(0, i - half) : i + half + 1]
+        if len(window) < 3:
+            out.append(values[i])
+            continue
+        middle = sorted(window)[1:-1]
+        out.append(sum(middle) / len(middle))
+    return out
 
 
 def _fill_between(ax, xs: np.ndarray, upper: list[float], lower: list[float], color: str) -> None:
@@ -71,10 +93,16 @@ def _fill_between(ax, xs: np.ndarray, upper: list[float], lower: list[float], co
         )
 
 
-def inflation_plot(cutoffs: dict[Rank, dict[int, int]], calendar: PuzzleCalendar) -> bytes | None:
-    """One panel with every rank's cutoff line, ``None`` when no rank has data."""
-    ranks = sorted(cutoffs, key=lambda r: r.low)
-    if not any(cutoffs[rank] for rank in ranks):
+def inflation_plot(
+    cutoffs: dict[Rank, dict[int, int]], calendar: PuzzleCalendar, ao: int | None = None
+) -> bytes | None:
+    """One panel with every rank's cutoff line, ``None`` when no rank has data.
+
+    ``ao`` smooths each rank's observed cutoffs with :func:`ao_smooth` before
+    drawing; the raw minimums still decide where every point sits.
+    """
+    ranks = [rank for rank in sorted(cutoffs, key=lambda r: r.low) if cutoffs[rank]]
+    if not ranks:
         return None
     puzzles = sorted({n for rank in ranks for n in cutoffs[rank]})
     days = [calendar.date_for(n) for n in puzzles]
@@ -87,6 +115,13 @@ def inflation_plot(cutoffs: dict[Rank, dict[int, int]], calendar: PuzzleCalendar
         for n, score in cutoffs[rank].items():
             values[grid[n]] = float(score)
         series[rank] = values
+
+    if ao is not None:
+        for rank in ranks:
+            observed = [i for i, n in enumerate(puzzles) if n in cutoffs[rank]]
+            smoothed = ao_smooth([series[rank][i] for i in observed], ao)
+            for i, value in zip(observed, smoothed, strict=True):
+                series[rank][i] = value
 
     fig = figure(16, 9)
     ax = fig.add_axes((0.05, 0.09, 0.90, 0.74), facecolor=PANEL)
@@ -102,10 +137,14 @@ def inflation_plot(cutoffs: dict[Rank, dict[int, int]], calendar: PuzzleCalendar
         0.05,
         0.905,
         "Lowest daily score reaching each rank's performance floor  ·  bands are the scores "
-        "performing as that rank  ·  lines join across days with no qualifying score",
+        "performing as that rank  ·  lines join across days with no qualifying score"
+        + (f"  ·  AO{ao} smoothed" if ao is not None else ""),
         color=MUTED,
         fontsize=9,
     )
+
+    floor = [0.0] * len(puzzles)
+    _fill_between(ax, xs, series[ranks[0]], floor, hex_color(RANKS[0].color))
 
     ceiling = [float(MAX_DAY_SCORE)] * len(puzzles)
     bounds = [series[rank] for rank in ranks[1:]] + [ceiling]
