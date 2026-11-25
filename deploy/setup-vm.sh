@@ -85,8 +85,19 @@ fi
 # --only-binary: never compile aiohttp/Pillow/numpy/matplotlib from source; a
 # C build is what pins a 1 GB VM at 100% CPU and swaps it into the ground. If
 # no wheel exists for this Python, fail loudly instead.
-capped .venv/bin/pip install --quiet --no-cache-dir --no-build-isolation --only-binary=:all: . \
-    || { echo "!!  No prebuilt wheels for $(.venv/bin/python --version); install a Python with wheel support" >&2; exit 1; }
+# Dependencies are only re-resolved when pyproject.toml changes; otherwise just
+# the bot's own package is reinstalled, with no PyPI round trips.
+DEPS_STAMP=.venv/.pyproject.sha256
+DEPS_HASH="$(sha256sum pyproject.toml | cut -d' ' -f1)"
+PIP_ARGS=(--quiet --no-cache-dir --no-build-isolation --only-binary=:all:)
+if [ "$(cat "$DEPS_STAMP" 2>/dev/null)" != "$DEPS_HASH" ]; then
+    capped .venv/bin/pip install "${PIP_ARGS[@]}" . \
+        || { echo "!!  No prebuilt wheels for $(.venv/bin/python --version); install a Python with wheel support" >&2; exit 1; }
+    echo "$DEPS_HASH" > "$DEPS_STAMP"
+else
+    echo "    dependencies unchanged; reinstalling the bot package only"
+    capped .venv/bin/pip install "${PIP_ARGS[@]}" --no-deps --no-index . >/dev/null
+fi
 mkdir -p data
 
 # Leaderboard images: DejaVu Sans for text (usually preinstalled) and Noto Color
@@ -98,7 +109,10 @@ if [ ! -f fonts/NotoColorEmoji.ttf ]; then
         https://github.com/googlefonts/noto-emoji/raw/v2.047/fonts/NotoColorEmoji.ttf \
         || echo "!!  Font download failed; leaderboards will be text-only until it exists"
 fi
-if ! ls /usr/share/fonts/*/DejaVuSans.ttf /usr/share/fonts/*/*/DejaVuSans.ttf >/dev/null 2>&1; then
+# One existing match is enough (ls over both globs fails if either is empty,
+# which re-ran the slow package install on every deploy).
+if ! compgen -G '/usr/share/fonts/*/DejaVuSans.ttf' >/dev/null \
+    && ! compgen -G '/usr/share/fonts/*/*/DejaVuSans.ttf' >/dev/null; then
     echo "==> Installing DejaVu Sans"
     if command -v apt-get >/dev/null 2>&1; then
         as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
