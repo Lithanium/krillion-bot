@@ -236,6 +236,8 @@ def _rank_bands(ax: Axes) -> None:
 
 
 MAX_PERFORMANCE_PLAYERS = 4
+MAX_LEGEND_COLUMNS = 2
+"""Wider rows overlap when several divers have long display names."""
 
 
 def performance_chart(
@@ -280,9 +282,9 @@ def performance_chart(
         [safe_name(name) for name, _ in series],
         bbox_to_anchor=(0, 1, 1, 0),
         loc="lower left",
-        mode="expand",
-        ncol=len(series),
+        ncol=min(len(series), MAX_LEGEND_COLUMNS),
     )
+
     buf = io.BytesIO()
     fig.savefig(
         buf, format="png", facecolor=ax.get_facecolor(), bbox_inches="tight", pad_inches=0.25
