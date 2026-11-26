@@ -249,12 +249,32 @@ def performance_chart(
     :data:`MAX_PERFORMANCE_PLAYERS`. Players with no contested day are skipped;
     ``None`` when nobody has one.
     """
+    return _multi_chart(players, calendar, performances=True)
+
+
+def ratings_chart(
+    players: Sequence[tuple[str, Sequence[RatingEntry]]], calendar: PuzzleCalendar
+) -> bytes | None:
+    """Every player's rating as its own coloured line on one graph.
+
+    Same layout as :func:`performance_chart`; players with no rated day are
+    skipped and ``None`` means nobody has one.
+    """
+    return _multi_chart(players, calendar, performances=False)
+
+
+def _multi_chart(
+    players: Sequence[tuple[str, Sequence[RatingEntry]]],
+    calendar: PuzzleCalendar,
+    *,
+    performances: bool,
+) -> bytes | None:
     series: list[tuple[str, list[tuple[object, float]]]] = []
     for name, entries in players[:MAX_PERFORMANCE_PLAYERS]:
         points = [
-            (calendar.date_for(e.puzzle_number), e.performance)
+            (calendar.date_for(e.puzzle_number), e.performance if performances else e.rating_after)
             for e in entries
-            if e.performance is not None
+            if not performances or e.performance is not None
         ]
         if points:
             series.append((name, points))

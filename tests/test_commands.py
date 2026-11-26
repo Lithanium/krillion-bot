@@ -337,3 +337,20 @@ def test_performance_multiple_members_one_image(seeded):
     i = Fake(1)
     run(seeded, "krillion performance", i, member(1, "alice"))
     assert i.embed.title == "Krillion performance — alice"
+
+
+def test_rating_multiple_members_one_image(seeded):
+    i = Fake(1)
+    run(seeded, "krillion rating", i, member(1, "alice"), member(2, "bob"))
+    assert i.deferred and i.files[0].filename == "krillion-rating.png"
+    i = Fake(1)
+    run(seeded, "krillion rating", i, member(1, "alice"), member(9, "nobody"))
+    assert i.files and "no rated Krillion days" in (i.sent[-1][0] or "")
+    i = Fake(1)
+    run(seeded, "krillion rating", i, member(8, "x"), member(9, "y"))
+    assert i.sent[-1][2] is True
+    assert "None of them has rated" in i.embed.description
+    # duplicates collapse to the single-player embed
+    i = Fake(1)
+    run(seeded, "krillion rating", i, member(1, "alice"), member(1, "alice"))
+    assert i.embed.title == "Krillion rating — alice"

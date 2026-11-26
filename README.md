@@ -82,10 +82,11 @@ SQLite on disk, ~60 MB RAM, no other services.
   - `/krillion stats [member]` – rating, peak, performance, games, wins, best /
     average / median score, perfect 700s, streaks, emoji tallies, weekday
     averages
-  - `/krillion rating [member]` – rating graph (Codeforces-style rank bands)
-  - `/krillion performance [member] [member2] [member3] [member4]` – each
-    day's performance marked; with two or more members everyone shares one
-    graph, a different coloured line each
+  - `/krillion rating [member] [member2] [member3] [member4]` – rating graph
+    (Codeforces-style rank bands); with two or more members everyone shares
+    one graph, a different coloured line each
+  - `/krillion performance [member] [member2] [member3] [member4]` – the same
+    for each day's performance
   - `/krillion history [member] [page]` – every rated day, newest first
   - `/krillion streak [member]` – current and longest daily and perfect streaks
   - `/krillion skips [member]` – puzzles missed since their first result

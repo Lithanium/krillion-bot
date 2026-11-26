@@ -54,3 +54,14 @@ def test_performance_chart_plots_each_player_and_skips_empty_ones():
     image = Image.open(io.BytesIO(png))
     assert image.format == "PNG" and image.width > 300
     assert performance_chart([("carol", carol)], calendar) is None
+
+
+def test_ratings_chart_plots_every_rated_day_including_solo():
+    from krillion_bot.charts import ratings_chart
+
+    calendar = PuzzleCalendar()
+    alice = [entry(n, 1200 + 30 * n, None) for n in range(1, 4)]  # solo days still count
+    bob = [entry(n, 1300, 1150) for n in range(1, 4)]
+    png = ratings_chart([("alice", alice), ("bob", bob)], calendar)
+    assert png is not None and Image.open(io.BytesIO(png)).format == "PNG"
+    assert ratings_chart([("carol", [])], calendar) is None
