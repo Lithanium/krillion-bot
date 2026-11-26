@@ -13,7 +13,7 @@ import discord
 from discord import app_commands
 
 from . import analytics
-from .charts import rating_chart
+from .charts import performance_chart, rating_chart
 from .discord_util import (
     alert,
     board_message,
@@ -220,12 +220,48 @@ def register(bot: KrillionBot) -> app_commands.Group:
     ) -> None:
         await rating_like(interaction, member, performance=False)
 
-    @group.command(description="Rating graph with each day's performance marked.")
-    @app_commands.describe(member="Whose performances (default: you)")
+    @group.command(description="Performance graph: up to 4 divers, one coloured line each.")
+    @app_commands.describe(
+        member="First diver (default: you)",
+        member2="Second diver (optional)",
+        member3="Third diver (optional)",
+        member4="Fourth diver (optional)",
+    )
     async def performance(
-        interaction: discord.Interaction, member: discord.Member | None = None
+        interaction: discord.Interaction,
+        member: discord.Member | None = None,
+        member2: discord.Member | None = None,
+        member3: discord.Member | None = None,
+        member4: discord.Member | None = None,
     ) -> None:
-        await rating_like(interaction, member, performance=True)
+        guild_id = guild_of(interaction)
+        chosen = [m for m in (member, member2, member3, member4) if m is not None]
+        targets: list[discord.Member] = []
+        for m in chosen or [interaction.user]:
+            if all(m.id != t.id for t in targets):
+                targets.append(m)
+        if len(targets) == 1:
+            await rating_like(interaction, targets[0] if chosen else None, performance=True)
+            return
+        players = []
+        skipped = []
+        for target in targets:
+            entries = storage.history_for_user(guild_id, target.id)
+            if any(e.performance is not None for e in entries):
+                players.append((target.display_name, entries))
+            else:
+                skipped.append(target.display_name)
+        if not players:
+            await reply(
+                interaction,
+                alert("None of them has contested Krillion days to plot yet."),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        png = await asyncio.to_thread(performance_chart, players, calendar)
+        note = f"`{'`, `'.join(skipped)}` has no contested Krillion days yet." if skipped else None
+        await interaction.followup.send(content=note, file=png_file(png, "krillion-rating.png"))
 
     @group.command(description="A diver's rated days, newest first.")
     @app_commands.describe(member="Whose history (default: you)", page="Page number")

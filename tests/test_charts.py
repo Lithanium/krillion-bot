@@ -40,3 +40,17 @@ def test_chart_name_helpers_follow_rank_bands_and_strip_symbols():
     assert name_color(1300) != name_color(1800)
     assert safe_name("A😀\nB\u0000\u200b  C") == "A B C"
     assert safe_name("🦐") == "Player"
+
+
+def test_performance_chart_plots_each_player_and_skips_empty_ones():
+    from krillion_bot.charts import performance_chart
+
+    calendar = PuzzleCalendar()
+    alice = [entry(n, 1200 + 30 * n, 1250 + 40 * n) for n in range(1, 5)]
+    bob = [entry(n, 1300, 1100 + 10 * n) for n in (1, 3, 4)]  # missed a day
+    carol = [entry(1, 1200, None)]  # solo days only: no line
+    png = performance_chart([("alice", alice), ("bob", bob), ("carol", carol)], calendar)
+    assert png is not None
+    image = Image.open(io.BytesIO(png))
+    assert image.format == "PNG" and image.width > 300
+    assert performance_chart([("carol", carol)], calendar) is None

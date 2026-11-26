@@ -188,9 +188,7 @@ def rating_chart(
         return None
     days = [d for d, _ in points]
     values = [v for _, v in points]
-    fig = Figure(figsize=(7.0, 3.5), dpi=DPI)
-    FigureCanvasAgg(fig)
-    ax = fig.add_subplot()
+    fig, ax = _rating_axes()
     ax.plot(
         days,
         values,
@@ -203,13 +201,7 @@ def rating_chart(
     )
     ax.set_ylim(min(min(values) - 50, 1100), max(max(values) + 50, 1500))
     ymin, ymax = ax.get_ylim()
-    bgcolor = ax.get_facecolor()
-    for rank, color in zip(RANKS, BAND_COLORS, strict=True):
-        ax.axhspan(
-            rank.low, rank.high, facecolor=color, alpha=0.8, edgecolor=bgcolor, linewidth=0.5
-        )
-    for loc in ax.get_xticks():
-        ax.axvline(loc, color=bgcolor, linewidth=0.5)
+    _rank_bands(ax)
     ax.set_ylim(ymin, ymax)
     fig.autofmt_xdate()
     ax.legend(
@@ -220,5 +212,79 @@ def rating_chart(
         ncol=1,
     )
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=bgcolor, bbox_inches="tight", pad_inches=0.25)
+    fig.savefig(
+        buf, format="png", facecolor=ax.get_facecolor(), bbox_inches="tight", pad_inches=0.25
+    )
+    return buf.getvalue()
+
+
+def _rating_axes() -> tuple[Figure, Axes]:
+    fig = Figure(figsize=(7.0, 3.5), dpi=DPI)
+    FigureCanvasAgg(fig)
+    return fig, fig.add_subplot()
+
+
+def _rank_bands(ax: Axes) -> None:
+    """Rank-coloured horizontal bands under the lines, clipped by the y-limits."""
+    bgcolor = ax.get_facecolor()
+    for rank, color in zip(RANKS, BAND_COLORS, strict=True):
+        ax.axhspan(
+            rank.low, rank.high, facecolor=color, alpha=0.8, edgecolor=bgcolor, linewidth=0.5
+        )
+    for loc in ax.get_xticks():
+        ax.axvline(loc, color=bgcolor, linewidth=0.5)
+
+
+MAX_PERFORMANCE_PLAYERS = 4
+
+
+def performance_chart(
+    players: Sequence[tuple[str, Sequence[RatingEntry]]], calendar: PuzzleCalendar
+) -> bytes | None:
+    """Every player's daily performance as its own coloured line on one graph.
+
+    ``players`` is ``(display name, rating history)`` pairs, at most
+    :data:`MAX_PERFORMANCE_PLAYERS`. Players with no contested day are skipped;
+    ``None`` when nobody has one.
+    """
+    series: list[tuple[str, list[tuple[object, float]]]] = []
+    for name, entries in players[:MAX_PERFORMANCE_PLAYERS]:
+        points = [
+            (calendar.date_for(e.puzzle_number), e.performance)
+            for e in entries
+            if e.performance is not None
+        ]
+        if points:
+            series.append((name, points))
+    if not series:
+        return None
+    fig, ax = _rating_axes()
+    all_values = [value for _, points in series for _, value in points]
+    for index, (_, points) in enumerate(series):
+        ax.plot(
+            [day for day, _ in points],
+            [value for _, value in points],
+            color=LINE_COLORS[index % len(LINE_COLORS)],
+            linestyle="-",
+            marker="o",
+            markersize=3,
+            markerfacecolor="white",
+            markeredgewidth=0.5,
+        )
+    ax.set_ylim(min(min(all_values) - 50, 1100), max(max(all_values) + 50, 1500))
+    ymin, ymax = ax.get_ylim()
+    _rank_bands(ax)
+    ax.set_ylim(ymin, ymax)
+    fig.autofmt_xdate()
+    ax.legend(
+        [safe_name(name) for name, _ in series],
+        bbox_to_anchor=(0, 1, 1, 0),
+        loc="lower left",
+        mode="expand",
+        ncol=len(series),
+    )
+    buf = io.BytesIO()
+    fig.savefig(
+        buf, format="png", facecolor=ax.get_facecolor(), bbox_inches="tight", pad_inches=0.25
+    )
     return buf.getvalue()
