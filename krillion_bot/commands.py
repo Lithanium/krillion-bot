@@ -13,7 +13,7 @@ import discord
 from discord import app_commands
 
 from . import analytics
-from .charts import rating_chart
+from .charts import performance_chart, rating_chart, ratings_chart
 from .discord_util import (
     alert,
     board_message,
@@ -49,6 +49,13 @@ TIMEFRAME_CHOICES = [
 PUZZLE_DESCRIBE = {
     "puzzle": "Puzzle number, e.g. 58 (default: today's)",
     "date": "Puzzle date as YYYY-MM-DD (instead of a number)",
+}
+
+RATING_DESCRIBE = {
+    "member": "First diver (default: you)",
+    "member2": "Second diver (optional)",
+    "member3": "Third diver (optional)",
+    "member4": "Fourth diver (optional)",
 }
 
 
@@ -213,19 +220,70 @@ def register(bot: KrillionBot) -> app_commands.Group:
         embed.set_image(url=f"attachment://{file.filename}")
         await interaction.followup.send(embed=embed, file=file)
 
-    @group.command(description="Rating graph for a diver.")
-    @app_commands.describe(member="Whose rating (default: you)")
-    async def rating(
-        interaction: discord.Interaction, member: discord.Member | None = None
+    async def compare(
+        interaction: discord.Interaction,
+        members: tuple[discord.Member | None, ...],
+        *,
+        performance: bool,
     ) -> None:
-        await rating_like(interaction, member, performance=False)
+        """Shared multi-diver graph for ``/krillion rating`` and ``performance``.
 
-    @group.command(description="Rating graph with each day's performance marked.")
-    @app_commands.describe(member="Whose performances (default: you)")
-    async def performance(
-        interaction: discord.Interaction, member: discord.Member | None = None
+        One diver (or none) falls back to the single-player embed; two or more
+        share one chart with a coloured line each.
+        """
+        guild_id = guild_of(interaction)
+        chosen = [m for m in members if m is not None]
+        targets: list[discord.Member] = []
+        for m in chosen or [interaction.user]:
+            if all(m.id != t.id for t in targets):
+                targets.append(m)
+        if len(targets) == 1:
+            await rating_like(interaction, targets[0] if chosen else None, performance=performance)
+            return
+        players = []
+        skipped = []
+        for target in targets:
+            entries = storage.history_for_user(guild_id, target.id)
+            contested = any(e.performance is not None for e in entries)
+            if entries and (contested or not performance):
+                players.append((target.display_name, entries))
+            else:
+                skipped.append(target.display_name)
+        kind = "contested" if performance else "rated"
+        if not players:
+            await reply(
+                interaction,
+                alert(f"None of them has {kind} Krillion days to plot yet."),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        render = performance_chart if performance else ratings_chart
+        png = await asyncio.to_thread(render, players, calendar)
+        note = f"`{'`, `'.join(skipped)}` has no {kind} Krillion days yet." if skipped else None
+        await interaction.followup.send(content=note, file=png_file(png, "krillion-rating.png"))
+
+    @group.command(description="Rating graph: up to 4 divers, one coloured line each.")
+    @app_commands.describe(**RATING_DESCRIBE)
+    async def rating(
+        interaction: discord.Interaction,
+        member: discord.Member | None = None,
+        member2: discord.Member | None = None,
+        member3: discord.Member | None = None,
+        member4: discord.Member | None = None,
     ) -> None:
-        await rating_like(interaction, member, performance=True)
+        await compare(interaction, (member, member2, member3, member4), performance=False)
+
+    @group.command(description="Performance graph: up to 4 divers, one coloured line each.")
+    @app_commands.describe(**RATING_DESCRIBE)
+    async def performance(
+        interaction: discord.Interaction,
+        member: discord.Member | None = None,
+        member2: discord.Member | None = None,
+        member3: discord.Member | None = None,
+        member4: discord.Member | None = None,
+    ) -> None:
+        await compare(interaction, (member, member2, member3, member4), performance=True)
 
     @group.command(description="A diver's rated days, newest first.")
     @app_commands.describe(member="Whose history (default: you)", page="Page number")
